@@ -1,0 +1,253 @@
+// Dibuja la ciudad en 3D leyendo la grilla de tiles.
+//
+// Convención de ejes: el mundo lógico es 2D (x, y en tiles). En Three.js el eje Y apunta
+// hacia arriba, así que el tile (x, y) se dibuja en la posición 3D (x, altura, y).
+// 1 tile = 1 unidad de Three.js.
+//
+// Rendimiento: hay ~150 edificios y decenas de barricadas. En vez de crear un Mesh por cada uno
+// (una llamada de dibujo por objeto) usamos InstancedMesh: una sola geometría de caja que la GPU
+// dibuja muchas veces, cada copia con su propia matriz (posición/escala) y color.
+// Es la misma técnica que usaremos para los cientos de zombies del hito 4.
+
+import * as THREE from 'three';
+import type { City } from '../world/city';
+import { Rng } from '../world/rng';
+import { FLOOR_HEIGHT, nodeCenter, SIDEWALK_WIDTH, type Rect } from '../world/tileGrid';
+
+const COLORS = {
+  ground: 0x2b2e34,
+  sidewalk: 0x5a5f66,
+  plaza: 0x46523f,
+  barricade: 0xd9822b,
+  start: 0x3ddc84,
+  exit: 0xff4d4d,
+  helipad: 0xf2c94c,
+  wall: 0x1a1c20,
+};
+
+const BUILDING_PALETTE = [0x8a8f98, 0x9c8f80, 0x7d8a8c, 0xa39a8b, 0x6f7680, 0x8c7f75];
+
+const SIDEWALK_HEIGHT = 0.15;
+const BARRICADE_HEIGHT = 1.4;
+
+export interface CityView {
+  root: THREE.Group;
+  /** Capa de depuración con el grafo (cruces coloreados por distancia y tramos abiertos). */
+  graphOverlay: THREE.Group;
+  dispose(): void;
+}
+
+export function buildCityView(city: City): CityView {
+  const root = new THREE.Group();
+  const { grid } = city;
+  const unitBox = new THREE.BoxGeometry(1, 1, 1);
+  // Movemos la caja para que su base quede en y=0: así escalar en altura la "levanta" desde el suelo.
+  unitBox.translate(0, 0.5, 0);
+
+  // Suelo (asfalto) que cubre toda la ciudad.
+  const ground = new THREE.Mesh(
+    new THREE.PlaneGeometry(grid.width, grid.height),
+    new THREE.MeshStandardMaterial({ color: COLORS.ground, roughness: 0.95 }),
+  );
+  ground.rotation.x = -Math.PI / 2;
+  ground.position.set(grid.width / 2, 0, grid.height / 2);
+  ground.receiveShadow = true;
+  root.add(ground);
+
+  // Veredas: una losa por manzana. Los edificios se apoyan encima y tapan el centro.
+  const sidewalks = instancedBoxes(unitBox, grid.blocks, () => SIDEWALK_HEIGHT, () => COLORS.sidewalk);
+  sidewalks.receiveShadow = true;
+  root.add(sidewalks);
+
+  // Edificios: altura = pisos × FLOOR_HEIGHT. Se achican un poco (inset) para que se note
+  // la separación entre edificios vecinos de una misma manzana.
+  // Los colores salen de un PRNG propio sembrado con la seed: son solo cosméticos,
+  // pero así la misma seed también se ve igual.
+  const colorRng = new Rng(city.seed).fork('building-colors');
+  const buildings = instancedBoxes(
+    unitBox,
+    grid.buildings,
+    (b) => b.floors * FLOOR_HEIGHT,
+    () => colorRng.pick(BUILDING_PALETTE),
+    0.12,
+  );
+  buildings.castShadow = true;
+  buildings.receiveShadow = true;
+  root.add(buildings);
+
+  // Barricadas.
+  const barricades = instancedBoxes(unitBox, grid.barricades, () => BARRICADE_HEIGHT, () => COLORS.barricade, 0.05);
+  barricades.castShadow = true;
+  root.add(barricades);
+
+  // Plaza y helipuerto.
+  const plazaBlock = grid.blocks.find((b) => b.isPlaza);
+  if (plazaBlock) {
+    const inner = {
+      x: plazaBlock.x + SIDEWALK_WIDTH,
+      y: plazaBlock.y + SIDEWALK_WIDTH,
+      w: plazaBlock.w - SIDEWALK_WIDTH * 2,
+      h: plazaBlock.h - SIDEWALK_WIDTH * 2,
+    };
+    root.add(boxMesh(unitBox, inner, 0.05, COLORS.plaza));
+    root.add(helipad(inner));
+    root.add(beacon(inner.x + inner.w / 2, inner.y + inner.h / 2, COLORS.exit));
+  }
+
+  // Salidas por carretera y punto de inicio: columnas de luz visibles desde lejos.
+  const { graph } = city.layout;
+  for (const exit of city.layout.exits) {
+    if (exit.kind !== 'road' || exit.node === undefined) continue;
+    root.add(beacon(nodeCenter(graph.nodeX(exit.node)), nodeCenter(graph.nodeY(exit.node)), COLORS.exit));
+  }
+  root.add(beacon(city.spawn.x, city.spawn.y, COLORS.start));
+
+  // Muro perimetral: el límite de la ciudad.
+  const wallT = 1;
+  const wallH = 3;
+  for (const rect of [
+    { x: -wallT, y: -wallT, w: grid.width + wallT * 2, h: wallT },
+    { x: -wallT, y: grid.height, w: grid.width + wallT * 2, h: wallT },
+    { x: -wallT, y: 0, w: wallT, h: grid.height },
+    { x: grid.width, y: 0, w: wallT, h: grid.height },
+  ]) {
+    root.add(boxMesh(unitBox, rect, wallH, COLORS.wall));
+  }
+
+  const graphOverlay = buildGraphOverlay(city);
+  graphOverlay.visible = false;
+  root.add(graphOverlay);
+
+  return {
+    root,
+    graphOverlay,
+    dispose() {
+      // Three.js no libera memoria de la GPU solo: hay que liberar geometrías y materiales a mano.
+      root.traverse((obj) => {
+        if (obj instanceof THREE.Mesh || obj instanceof THREE.LineSegments) {
+          obj.geometry.dispose();
+          const materials = Array.isArray(obj.material) ? obj.material : [obj.material];
+          materials.forEach((m) => m.dispose());
+        }
+      });
+    },
+  };
+}
+
+/** Crea un InstancedMesh con una caja por rectángulo. */
+function instancedBoxes<T extends Rect>(
+  geometry: THREE.BufferGeometry,
+  rects: readonly T[],
+  heightOf: (rect: T) => number,
+  colorOf: (rect: T) => number,
+  inset = 0,
+): THREE.InstancedMesh {
+  const mesh = new THREE.InstancedMesh(
+    geometry,
+    new THREE.MeshStandardMaterial({ roughness: 0.85 }),
+    Math.max(1, rects.length),
+  );
+  mesh.count = rects.length;
+  const matrix = new THREE.Matrix4();
+  const color = new THREE.Color();
+  rects.forEach((rect, i) => {
+    const w = rect.w - inset * 2;
+    const d = rect.h - inset * 2;
+    matrix.makeScale(w, heightOf(rect), d);
+    matrix.setPosition(rect.x + rect.w / 2, 0, rect.y + rect.h / 2);
+    mesh.setMatrixAt(i, matrix);
+    mesh.setColorAt(i, color.setHex(colorOf(rect)));
+  });
+  mesh.instanceMatrix.needsUpdate = true;
+  if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+  return mesh;
+}
+
+function boxMesh(geometry: THREE.BufferGeometry, rect: Rect, height: number, color: number): THREE.Mesh {
+  const mesh = new THREE.Mesh(geometry.clone(), new THREE.MeshStandardMaterial({ color, roughness: 0.9 }));
+  mesh.scale.set(rect.w, height, rect.h);
+  mesh.position.set(rect.x + rect.w / 2, 0, rect.y + rect.h / 2);
+  mesh.receiveShadow = true;
+  return mesh;
+}
+
+/** Círculo amarillo con una "H" encima. */
+function helipad(area: Rect): THREE.Group {
+  const group = new THREE.Group();
+  const cx = area.x + area.w / 2;
+  const cz = area.y + area.h / 2;
+  const material = new THREE.MeshStandardMaterial({ color: COLORS.helipad, roughness: 0.6 });
+
+  const ring = new THREE.Mesh(new THREE.RingGeometry(3.2, 3.8, 48), material);
+  ring.rotation.x = -Math.PI / 2;
+  ring.position.set(cx, 0.08, cz);
+  group.add(ring);
+
+  const bar = (w: number, d: number, x: number, z: number) => {
+    const m = new THREE.Mesh(new THREE.BoxGeometry(w, 0.05, d), material);
+    m.position.set(cx + x, 0.1, cz + z);
+    group.add(m);
+  };
+  bar(0.5, 3, -0.9, 0);
+  bar(0.5, 3, 0.9, 0);
+  bar(1.3, 0.5, 0, 0);
+  return group;
+}
+
+/** Columna de luz semitransparente para marcar un punto a la distancia. */
+function beacon(x: number, z: number, color: number): THREE.Mesh {
+  const height = 40;
+  const mesh = new THREE.Mesh(
+    new THREE.CylinderGeometry(1.2, 1.2, height, 24, 1, true),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.35, depthWrite: false, side: THREE.DoubleSide }),
+  );
+  mesh.position.set(x, height / 2, z);
+  return mesh;
+}
+
+/**
+ * Capa de depuración: dibuja el grafo encima de la ciudad.
+ * Cada cruce se colorea según su distancia BFS desde el inicio (verde = cerca, rojo = lejos)
+ * y solo se dibujan los tramos abiertos. Así se "ve" el laberinto que generó el algoritmo.
+ * Esa distancia es la que usaremos en el hito 6 para las zonas de dificultad.
+ */
+function buildGraphOverlay(city: City): THREE.Group {
+  const group = new THREE.Group();
+  const { graph, distanceFromStart } = city.layout;
+  const maxDist = Math.max(...distanceFromStart);
+  const y = 6;
+
+  const positions: number[] = [];
+  for (const edge of graph.edges) {
+    if (graph.blocked[edge.id]) continue;
+    positions.push(
+      nodeCenter(graph.nodeX(edge.a)), y, nodeCenter(graph.nodeY(edge.a)),
+      nodeCenter(graph.nodeX(edge.b)), y, nodeCenter(graph.nodeY(edge.b)),
+    );
+  }
+  const lines = new THREE.LineSegments(
+    new THREE.BufferGeometry().setAttribute('position', new THREE.Float32BufferAttribute(positions, 3)),
+    new THREE.LineBasicMaterial({ color: 0xffffff, depthTest: false, transparent: true, opacity: 0.8 }),
+  );
+  lines.renderOrder = 10;
+  group.add(lines);
+
+  const sphere = new THREE.SphereGeometry(1, 12, 8);
+  const nodes = new THREE.InstancedMesh(
+    sphere,
+    new THREE.MeshBasicMaterial({ depthTest: false, transparent: true }),
+    graph.nodeCount,
+  );
+  nodes.renderOrder = 11;
+  const matrix = new THREE.Matrix4();
+  const color = new THREE.Color();
+  const near = new THREE.Color(COLORS.start);
+  const far = new THREE.Color(COLORS.exit);
+  for (let id = 0; id < graph.nodeCount; id++) {
+    matrix.makeTranslation(nodeCenter(graph.nodeX(id)), y, nodeCenter(graph.nodeY(id)));
+    nodes.setMatrixAt(id, matrix);
+    nodes.setColorAt(id, color.copy(near).lerp(far, distanceFromStart[id] / maxDist));
+  }
+  group.add(nodes);
+  return group;
+}
