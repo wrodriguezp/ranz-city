@@ -1,0 +1,47 @@
+// Lógica del jugador: posición, hacia dónde mira y movimiento con colisión.
+// Todo en coordenadas del mundo 2D (tiles). No sabe nada de Three.js ni de la cámara.
+
+import type { TileGrid } from '../world/tileGrid';
+import { moveCircle } from './collision';
+
+/** Tiles por segundo. Una calle (4 tiles) se cruza en menos de un segundo. */
+export const PLAYER_SPEED = 5.5;
+export const PLAYER_RADIUS = 0.4;
+
+export interface PlayerState {
+  x: number;
+  y: number;
+  /** Ángulo hacia donde mira, en radianes, en el plano del mundo (0 = +x). */
+  facing: number;
+}
+
+export interface PlayerIntent {
+  /** Dirección de movimiento ya en ejes del MUNDO, normalizada (o 0,0 si está quieto). */
+  moveX: number;
+  moveY: number;
+  /** Punto del suelo al que apunta el mouse, en tiles. */
+  aimX: number;
+  aimY: number;
+}
+
+export function createPlayer(x: number, y: number): PlayerState {
+  return { x, y, facing: 0 };
+}
+
+export function updatePlayer(player: PlayerState, intent: PlayerIntent, grid: TileGrid, dt: number): void {
+  const moved = moveCircle(
+    grid,
+    player.x,
+    player.y,
+    PLAYER_RADIUS,
+    intent.moveX * PLAYER_SPEED * dt,
+    intent.moveY * PLAYER_SPEED * dt,
+  );
+  player.x = moved.x;
+  player.y = moved.y;
+
+  // Mirar hacia el mouse. Si el mouse está justo encima del jugador, mantenemos el ángulo anterior.
+  const ax = intent.aimX - player.x;
+  const ay = intent.aimY - player.y;
+  if (ax * ax + ay * ay > 0.01) player.facing = Math.atan2(ay, ax);
+}
