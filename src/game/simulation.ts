@@ -5,6 +5,8 @@
 // y después el render lee el estado. Nada de aquí importa Three.js.
 
 import type { City } from '../world/city';
+import { dangerAt } from '../world/zones';
+import { moveCircle } from './collision';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { createFlashlight, updateFlashlight } from './flashlight';
 import { FlowField } from './flowField';
@@ -56,7 +58,14 @@ export function createGameState(city: City): GameState {
     stats: { kills: 0, shots: 0, hordes: 0 },
     events: [],
   };
-  for (const spawn of city.encounters.zombies) state.zombies.push(createZombie(state, spawn.x, spawn.y, spawn.kind));
+  for (const spawn of city.encounters.zombies) {
+    const z = createZombie(state, spawn.x, spawn.y, spawn.kind);
+    // Los grupos se reparten al azar: si alguno quedó rozando una pared, lo empujamos afuera.
+    const fixed = moveCircle(city.grid, z.x, z.y, z.radius, 0, 0);
+    z.x = z.prevX = z.homeX = fixed.x;
+    z.y = z.prevY = z.homeY = fixed.y;
+    state.zombies.push(z);
+  }
   return state;
 }
 
@@ -75,7 +84,7 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
 
   rt.field.update(state.player.x, state.player.y);
   updateZombies(state, rt, dt);
-  updateHordes(state, rt, dt, 0.4);
+  updateHordes(state, rt, dt, dangerAt(rt.city.zones, state.player.x, state.player.y));
 
   if (state.player.hp <= 0 && state.status === 'playing') {
     state.status = 'lost';

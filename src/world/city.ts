@@ -8,6 +8,7 @@ import { generateLayout, type CityLayout } from './cityLayout';
 import { planEncounters, type EncounterPlan } from './encounters';
 import { hashString, Rng } from './rng';
 import { buildTileGrid, nodeCenter, type TileGrid } from './tileGrid';
+import { computeZones, type ZoneMap } from './zones';
 
 export interface City {
   /** La seed tal como la escribió el jugador (texto). */
@@ -19,6 +20,8 @@ export interface City {
   spawn: { x: number; y: number };
   /** Dónde empiezan los zombies (el plan; los zombies vivos son estado dinámico). */
   encounters: EncounterPlan;
+  /** Peligro por zona (sube cerca de las salidas). */
+  zones: ZoneMap;
   /** Huella de la ciudad generada, para comprobar a simple vista que la generación es determinista. */
   fingerprint: string;
 }
@@ -41,9 +44,10 @@ export function generateCity(seedText: string): City {
   const { graph, startNode } = layout;
   const spawn = { x: nodeCenter(graph.nodeX(startNode)), y: nodeCenter(graph.nodeY(startNode)) };
 
-  const encounters = planEncounters(grid, layout, spawn, rng.fork('encounters'));
+  const zones = computeZones(layout);
+  const encounters = planEncounters(grid, layout, zones, spawn, rng.fork('encounters'));
 
-  return { seedText, seed, layout, grid, spawn, encounters, fingerprint: fingerprintOf(grid) };
+  return { seedText, seed, layout, grid, spawn, encounters, zones, fingerprint: fingerprintOf(grid) };
 }
 
 /** Hash FNV-1a de los tiles y las alturas de los edificios. */
