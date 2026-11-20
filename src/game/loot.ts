@@ -65,6 +65,7 @@ export function updateLoot(state: GameState, rt: ZombieRuntime, holding: boolean
   loot.target = -1;
   loot.progress = 0;
   const found = container.loot.map((item) => give(state, item));
+  if (found.length) state.events.push({ type: 'sfx', name: 'pickup', x: state.player.x, y: state.player.y });
   const what = container.kind === 'car' ? 'el auto' : container.kind === 'crate' ? 'la caja' : 'el cuerpo';
   state.events.push({
     type: 'message',

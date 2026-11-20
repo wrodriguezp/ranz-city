@@ -16,7 +16,7 @@
 import type { CityLayout } from './cityLayout';
 import type { Rng } from './rng';
 
-export const STREET_WIDTH = 4;
+export const STREET_WIDTH = 6;
 export const BLOCK_SIZE = 12;
 export const SIDEWALK_WIDTH = 1;
 export const BARRICADE_THICKNESS = 2;
@@ -116,7 +116,7 @@ export function buildTileGrid(layout: CityLayout, rng: Rng): TileGrid {
 
       // Los edificios son más altos hacia el centro (el "downtown").
       const distToCenter = Math.hypot(bx - centerX, by - centerY) / Math.hypot(centerX, centerY);
-      const downtownBonus = Math.round((1 - distToCenter) * 4);
+      const downtownBonus = Math.round((1 - distToCenter) * 3);
       for (const lot of splitIntoLots(interior, rng)) {
         buildings.push({ ...lot, floors: rng.int(1, 2) + downtownBonus });
       }

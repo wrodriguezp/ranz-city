@@ -53,6 +53,8 @@ const MELEE_ARC = (120 * Math.PI) / 180;
 const MELEE_DAMAGE = 55;
 const MELEE_MAX_TARGETS = 3;
 const MELEE_NOISE = 6;
+/** Ejecución sigilosa: agachado y por sorpresa, el bate mata de un golpe y casi sin ruido. */
+const TAKEDOWN_NOISE = 2;
 
 export function createWeapons(): WeaponState {
   return { current: 'pistol', mag: PISTOL_MAG, reserve: 12, cooldown: 0, reloadTimer: 0 };
@@ -99,6 +101,7 @@ function startReload(state: GameState): void {
     return;
   }
   weapon.reloadTimer = RELOAD_TIME;
+  state.events.push({ type: 'sfx', name: 'reload', x: state.player.x, y: state.player.y });
 }
 
 function shoot(state: GameState, rt: ZombieRuntime): void {
@@ -108,6 +111,7 @@ function shoot(state: GameState, rt: ZombieRuntime): void {
     // Gatillo en vacío: recarga sola si hay reserva.
     if (weapon.reserve > 0) startReload(state);
     else state.events.push({ type: 'message', text: '*clic* Sin balas: cambia al bate [Q]' });
+    state.events.push({ type: 'sfx', name: 'empty', x: state.player.x, y: state.player.y });
     weapon.cooldown = 0.3;
     return;
   }
@@ -172,11 +176,20 @@ function swing(state: GameState, rt: ZombieRuntime): void {
     candidates.push({ index: i, dist });
   });
   candidates.sort((a, b) => a.dist - b.dist);
+  let loud = candidates.length === 0;
   for (const { index, dist } of candidates.slice(0, MELEE_MAX_TARGETS)) {
     const z = state.zombies[index];
     const nx = (z.x - player.x) / (dist || 1);
     const ny = (z.y - player.y) / (dist || 1);
-    damageZombie(state, z, MELEE_DAMAGE, nx * 7, ny * 7, 0.55);
+    // Un zombie común que todavía no te persigue, golpeado agachado: ejecución de un golpe.
+    const unaware = z.mode !== 'chase' && z.mode !== 'charge';
+    if (player.sneaking && unaware && z.kind === 'walker') {
+      damageZombie(state, z, z.hp, nx * 2, ny * 2, 0);
+      state.events.push({ type: 'sfx', name: 'takedown', x: z.x, y: z.y });
+    } else {
+      damageZombie(state, z, MELEE_DAMAGE, nx * 7, ny * 7, 0.55);
+      loud = true;
+    }
   }
-  makeNoise(state, player.x, player.y, MELEE_NOISE);
+  makeNoise(state, player.x, player.y, loud ? MELEE_NOISE : TAKEDOWN_NOISE);
 }

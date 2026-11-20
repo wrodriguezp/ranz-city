@@ -1,0 +1,356 @@
+// Efectos de sonido sintetizados con WebAudio: no hay archivos de audio, todo se arma con
+// osciladores y ruido filtrado (igual que los gráficos usan formas básicas en vez de modelos).
+//
+// Cómo se "fabrica" un sonido:
+//  - Un disparo es un estallido de RUIDO blanco que se apaga en ~0.2 s, más un golpe grave
+//    (una senoidal que baja de 150 a 40 Hz): el "pum" que se siente en el pecho.
+//  - Un gruñido de zombie es una onda diente de sierra grave (70-110 Hz) con vibrato, pasada
+//    por un filtro pasa-bajos: suena a garganta.
+//  - La "envolvente" (cómo sube y baja el volumen en el tiempo) es lo que más define cada sonido.
+//
+// El audio vive del lado del render: la lógica solo emite eventos ("sonó un disparo en x,y") y
+// aquí se decide el volumen según la distancia y el paneo izquierda/derecha según la pantalla.
+
+import type { GameEvent } from '../game/state';
+
+export interface Listener {
+  x: number;
+  y: number;
+  /** Eje "derecha de la pantalla" proyectado al suelo, para panear. */
+  rightX: number;
+  rightY: number;
+}
+
+/** Más allá de esto (tiles) un sonido ya no se oye. */
+const HEARING = 40;
+
+export class Sfx {
+  private ctx: AudioContext | null = null;
+  private master: GainNode | null = null;
+  private noise: AudioBuffer | null = null;
+  private muted = false;
+  /** Para no saturar: último momento en que sonó cada tipo de sonido. */
+  private readonly last = new Map<string, number>();
+  private nextAmbient = 4;
+  private nextHeartbeat = 0;
+
+  constructor() {
+    // Los navegadores solo dejan crear audio después de una interacción del usuario.
+    const unlock = () => {
+      this.ensure();
+      void this.ctx?.resume();
+    };
+    window.addEventListener('pointerdown', unlock);
+    window.addEventListener('keydown', unlock);
+  }
+
+  toggleMute(): boolean {
+    this.muted = !this.muted;
+    if (this.master) this.master.gain.value = this.muted ? 0 : 0.6;
+    return this.muted;
+  }
+
+  private ensure(): void {
+    if (this.ctx) return;
+    this.ctx = new AudioContext();
+    this.master = this.ctx.createGain();
+    this.master.gain.value = this.muted ? 0 : 0.6;
+    // Un compresor al final evita que 20 sonidos juntos revienten los parlantes.
+    const comp = this.ctx.createDynamicsCompressor();
+    this.master.connect(comp).connect(this.ctx.destination);
+    // Un segundo de ruido blanco, reutilizado por todos los sonidos "sucios".
+    const length = this.ctx.sampleRate;
+    this.noise = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
+    const data = this.noise.getChannelData(0);
+    for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+  }
+
+  /** Procesa los eventos de los pasos de este cuadro. */
+  handle(events: readonly GameEvent[], l: Listener): void {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    for (const e of events) {
+      switch (e.type) {
+        case 'shot':
+          this.shot(this.place(e.fromX, e.fromY, l, 1));
+          break;
+        case 'swing':
+          this.swing(this.place(e.x, e.y, l, 0.7));
+          break;
+        case 'blood':
+          if (this.throttle('hit', 0.04)) this.hit(this.place(e.x, e.y, l, 0.8));
+          break;
+        case 'hurt':
+          if (this.throttle('hurt', 0.25)) this.hurt(this.place(l.x, l.y, l, 0.9));
+          break;
+        case 'alarm':
+          this.alarm(this.place(e.x, e.y, l, 0.8, 60));
+          break;
+        case 'sfx':
+          this.named(e.name, e.x, e.y, l);
+          break;
+      }
+    }
+  }
+
+  /**
+   * Sonidos de ambiente que no salen de la lógica: gruñidos de zombies cercanos cada tanto
+   * (para que se sientan aunque no se vean) y el latido con poca vida.
+   */
+  ambient(dt: number, l: Listener, zombies: readonly { x: number; y: number; hp: number }[], hp: number): void {
+    if (!this.ctx || this.ctx.state !== 'running') return;
+    this.nextAmbient -= dt;
+    if (this.nextAmbient <= 0) {
+      // Un zombie al azar entre los cercanos.
+      const near = zombies.filter((z) => z.hp > 0 && Math.abs(z.x - l.x) < 18 && Math.abs(z.y - l.y) < 18);
+      if (near.length) {
+        const z = near[Math.floor(Math.random() * near.length)];
+        this.groan(this.place(z.x, z.y, l, 0.55, 22));
+      }
+      // Más zombies cerca = gruñidos más seguidos.
+      this.nextAmbient = 1.2 + Math.random() * 3 / Math.max(1, near.length / 4);
+    }
+    this.nextHeartbeat -= dt;
+    if (hp > 0 && hp <= 30 && this.nextHeartbeat <= 0) {
+      this.heartbeat();
+      this.nextHeartbeat = 0.55 + hp / 60;
+    }
+  }
+
+  // --- Ubicación -----------------------------------------------------------------------------
+
+  /** Volumen por distancia y paneo por el lado de la pantalla. Devuelve el nodo de entrada. */
+  private place(x: number, y: number, l: Listener, volume: number, hearing = HEARING): AudioNode | null {
+    const ctx = this.ctx!;
+    const dx = x - l.x;
+    const dy = y - l.y;
+    const d = Math.hypot(dx, dy);
+    if (d > hearing) return null;
+    // Caída suave: cerca casi al máximo, lejos se pierde.
+    const g = volume * Math.pow(1 - d / hearing, 1.6);
+    const gain = ctx.createGain();
+    gain.gain.value = g;
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = d < 0.5 ? 0 : Math.max(-1, Math.min(1, ((dx * l.rightX + dy * l.rightY) / d) * Math.min(1, d / 8)));
+    gain.connect(pan).connect(this.master!);
+    return gain;
+  }
+
+  private throttle(key: string, seconds: number): boolean {
+    const now = this.ctx!.currentTime;
+    if (now - (this.last.get(key) ?? -99) < seconds) return false;
+    this.last.set(key, now);
+    return true;
+  }
+
+  private named(name: string, x: number, y: number, l: Listener): void {
+    switch (name) {
+      case 'step':
+        this.step(this.place(x, y, l, 0.18));
+        break;
+      case 'reload':
+        this.click(this.place(x, y, l, 0.5), 0, 2200);
+        this.click(this.place(x, y, l, 0.6), 1.25, 1500);
+        break;
+      case 'empty':
+        this.click(this.place(x, y, l, 0.6), 0, 3000);
+        break;
+      case 'takedown':
+        this.hit(this.place(x, y, l, 1));
+        this.crunch(this.place(x, y, l, 0.7));
+        break;
+      case 'spotted':
+        if (this.throttle('spotted', 0.5)) this.groan(this.place(x, y, l, 0.9, 30), true);
+        break;
+      case 'pickup':
+        this.blip(this.place(x, y, l, 0.35), [660, 990]);
+        break;
+      case 'medkit':
+        this.blip(this.place(x, y, l, 0.35), [523, 659, 784]);
+        break;
+      case 'battery':
+        this.click(this.place(x, y, l, 0.5), 0, 1800);
+        this.blip(this.place(x, y, l, 0.25), [880]);
+        break;
+      case 'horde':
+        this.horde();
+        break;
+      case 'helicopter':
+        this.rotor(this.place(x, y, l, 1, 90));
+        break;
+    }
+  }
+
+  // --- Bloques de construcción ---------------------------------------------------------------
+
+  /** Ruido blanco filtrado con una envolvente de ataque y caída. */
+  private burst(
+    out: AudioNode,
+    at: number,
+    duration: number,
+    filter: BiquadFilterType,
+    freq: number,
+    peak: number,
+    q = 1,
+  ): BiquadFilterNode {
+    const ctx = this.ctx!;
+    const src = ctx.createBufferSource();
+    src.buffer = this.noise;
+    const f = ctx.createBiquadFilter();
+    f.type = filter;
+    f.frequency.value = freq;
+    f.Q.value = q;
+    const env = ctx.createGain();
+    const t = ctx.currentTime + at;
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(peak, t + 0.005);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    src.connect(f).connect(env).connect(out);
+    src.start(t, Math.random() * 0.5);
+    src.stop(t + duration + 0.05);
+    return f;
+  }
+
+  /** Tono con barrido de frecuencia y caída exponencial. */
+  private tone(out: AudioNode, at: number, type: OscillatorType, from: number, to: number, duration: number, peak: number): void {
+    const ctx = this.ctx!;
+    const osc = ctx.createOscillator();
+    osc.type = type;
+    const t = ctx.currentTime + at;
+    osc.frequency.setValueAtTime(from, t);
+    osc.frequency.exponentialRampToValueAtTime(to, t + duration);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(peak, t + 0.01);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(env).connect(out);
+    osc.start(t);
+    osc.stop(t + duration + 0.05);
+  }
+
+  // --- Sonidos -------------------------------------------------------------------------------
+
+  private shot(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0, 0.22, 'lowpass', 3500, 1.0);
+    this.burst(out, 0, 0.06, 'highpass', 2500, 0.6);
+    this.tone(out, 0, 'sine', 150, 40, 0.18, 0.9);
+    // Eco de la calle: el mismo estallido, más bajo y apagado, un poco después.
+    this.burst(out, 0.09, 0.45, 'lowpass', 900, 0.25);
+  }
+
+  private swing(out: AudioNode | null): void {
+    if (!out) return;
+    const f = this.burst(out, 0, 0.18, 'bandpass', 600, 0.5, 2);
+    f.frequency.exponentialRampToValueAtTime(2400, this.ctx!.currentTime + 0.15);
+  }
+
+  private hit(out: AudioNode | null): void {
+    if (!out) return;
+    this.tone(out, 0, 'sine', 110, 50, 0.12, 0.8);
+    this.burst(out, 0, 0.09, 'lowpass', 1200, 0.5);
+  }
+
+  private crunch(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0.02, 0.12, 'bandpass', 1800, 0.6, 3);
+    this.burst(out, 0.07, 0.1, 'bandpass', 1200, 0.4, 3);
+  }
+
+  private hurt(out: AudioNode | null): void {
+    if (!out) return;
+    const ctx = this.ctx!;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900;
+    lp.connect(out);
+    this.tone(lp, 0, 'sawtooth', 190, 110, 0.22, 0.5);
+    this.burst(out, 0, 0.08, 'lowpass', 600, 0.6);
+  }
+
+  private step(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0, 0.07, 'lowpass', 420 + Math.random() * 200, 0.8);
+  }
+
+  private click(out: AudioNode | null, at: number, freq: number): void {
+    if (!out) return;
+    this.burst(out, at, 0.035, 'bandpass', freq, 0.9, 4);
+  }
+
+  private blip(out: AudioNode | null, notes: number[]): void {
+    if (!out) return;
+    notes.forEach((n, i) => this.tone(out, i * 0.07, 'triangle', n, n, 0.12, 0.6));
+  }
+
+  /** Gruñido: diente de sierra grave con vibrato, filtrado. "angry" = más fuerte y más agudo. */
+  private groan(out: AudioNode | null, angry = false): void {
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const duration = angry ? 0.7 : 0.9 + Math.random() * 0.6;
+    const base = (angry ? 120 : 70) + Math.random() * 40;
+    const osc = ctx.createOscillator();
+    osc.type = 'sawtooth';
+    osc.frequency.setValueAtTime(base, t);
+    osc.frequency.linearRampToValueAtTime(base * (angry ? 0.7 : 0.85), t + duration);
+    // Vibrato: otro oscilador lento que mueve la frecuencia del primero.
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 5 + Math.random() * 4;
+    const depth = ctx.createGain();
+    depth.gain.value = base * 0.08;
+    lfo.connect(depth).connect(osc.frequency);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = angry ? 900 : 520;
+    lp.Q.value = 4;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(angry ? 0.55 : 0.35, t + 0.12);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(lp).connect(env).connect(out);
+    osc.start(t);
+    lfo.start(t);
+    osc.stop(t + duration + 0.05);
+    lfo.stop(t + duration + 0.05);
+  }
+
+  /** Muchos gruñidos desafinados que crecen: la horda que viene. */
+  private horde(): void {
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const out = ctx.createGain();
+    out.gain.setValueAtTime(0.0001, t);
+    out.gain.exponentialRampToValueAtTime(0.5, t + 1.5);
+    out.gain.exponentialRampToValueAtTime(0.0001, t + 4);
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 400;
+    out.connect(lp).connect(this.master!);
+    for (let i = 0; i < 7; i++) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.value = 55 + Math.random() * 50;
+      osc.connect(out);
+      osc.start(t + Math.random() * 0.6);
+      osc.stop(t + 4.1);
+    }
+    this.burst(out, 0, 4, 'lowpass', 300, 0.5);
+  }
+
+  /** Aspas del helicóptero: ruido grave pulsado ~11 veces por segundo durante unos segundos. */
+  private rotor(out: AudioNode | null): void {
+    if (!out) return;
+    for (let i = 0; i < 70; i++) this.burst(out, i / 11, 0.07, 'lowpass', 260, 0.8 * Math.min(1, (70 - i) / 20));
+  }
+
+  private alarm(out: AudioNode | null): void {
+    if (!out) return;
+    for (let i = 0; i < 12; i++) this.tone(out, i * 0.32, 'square', i % 2 ? 620 : 820, i % 2 ? 620 : 820, 0.3, 0.25);
+  }
+
+  private heartbeat(): void {
+    const out = this.master!;
+    this.tone(out, 0, 'sine', 60, 40, 0.14, 0.55);
+    this.tone(out, 0.18, 'sine', 55, 38, 0.16, 0.4);
+  }
+}

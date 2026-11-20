@@ -39,8 +39,8 @@ export interface EncounterPlan {
 /** Zona segura alrededor del inicio: nadie aparece encima del jugador. */
 export const SAFE_RADIUS = 22;
 /** Probabilidad de un zombie por tile caminable: base + extra × peligro. */
-const BASE_DENSITY = 0.008;
-const DANGER_DENSITY = 0.03;
+const BASE_DENSITY = 0.006;
+const DANGER_DENSITY = 0.022;
 /** Los primeros tramos de la ruta nunca tienen tanque (no es justo encontrarlo de entrada). */
 const TANK_MIN_EDGE = 2;
 
@@ -103,7 +103,8 @@ export function planEncounters(
       tankEdges.add(key(best.a, best.b));
       tankEdge = [best.a, best.b];
       const mid = edgeMidpoint(graph, best.a, best.b);
-      zombies.push({ x: mid.x, y: mid.y, kind: 'tank' });
+      const spot = freeSpot(mid.x, mid.y, 1.0, walkable) ?? mid;
+      zombies.push({ x: spot.x, y: spot.y, kind: 'tank' });
     } else if (best) {
       tankEdge = [best.a, best.b]; // otro tanque ya cuida este tramo
     }
@@ -141,4 +142,34 @@ export function planEncounters(
   });
 
   return { zombies, routes };
+}
+
+/**
+ * Busca, en espiral alrededor de (x, y), un punto donde quepa un círculo de radio r sin tocar
+ * nada sólido. El tanque es ancho: si su tramo tiene un auto estacionado al medio, lo corremos.
+ */
+function freeSpot(
+  x: number,
+  y: number,
+  r: number,
+  walkable: (x: number, y: number) => boolean,
+): { x: number; y: number } | null {
+  const fits = (cx: number, cy: number) => {
+    for (let ty = Math.floor(cy - r); ty <= Math.floor(cy + r); ty++) {
+      for (let tx = Math.floor(cx - r); tx <= Math.floor(cx + r); tx++) {
+        if (!walkable(tx + 0.5, ty + 0.5)) return false;
+      }
+    }
+    return true;
+  };
+  for (let radius = 0; radius <= 6; radius += 0.5) {
+    const steps = Math.max(1, Math.round(radius * 8));
+    for (let i = 0; i < steps; i++) {
+      const a = (i / steps) * Math.PI * 2;
+      const cx = x + Math.cos(a) * radius;
+      const cy = y + Math.sin(a) * radius;
+      if (fits(cx, cy)) return { x: cx, y: cy };
+    }
+  }
+  return null;
 }

@@ -45,6 +45,8 @@ export interface CityView {
 }
 
 const BUILDING_INSET = 0.12;
+/** Valor que los edificios escriben en el stencil. */
+export const BUILDING_STENCIL = 1;
 
 export function buildCityView(city: City): CityView {
   const root = new THREE.Group();
@@ -82,6 +84,13 @@ export function buildCityView(city: City): CityView {
   );
   buildings.castShadow = true;
   buildings.receiveShadow = true;
+  // Los edificios marcan en el STENCIL (un búfer aparte, un número por píxel) los píxeles que
+  // cubren. Las siluetas de zombies (zombieView) solo se dibujan sobre esos píxeles.
+  const buildingMaterial = buildings.material as THREE.MeshStandardMaterial;
+  buildingMaterial.stencilWrite = true;
+  buildingMaterial.stencilRef = BUILDING_STENCIL;
+  buildingMaterial.stencilFunc = THREE.AlwaysStencilFunc;
+  buildingMaterial.stencilZPass = THREE.ReplaceStencilOp;
   root.add(buildings);
   const occlusion = createBuildingOcclusion(city, buildings, unitBox);
   root.add(occlusion.ghosts);

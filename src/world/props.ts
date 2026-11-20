@@ -75,9 +75,9 @@ export function placeProps(
     const toTiles = (a: number, c: number) => (edge.dir === 'h' ? { x: a, y: c } : { x: c, y: a });
 
     if (rng.chance(CAR_CHANCE)) {
-      // Auto de 3 × 2 en uno de los dos carriles: deja libre el otro carril (2 tiles).
+      // Auto de 3 × 2 pegado a una de las dos veredas: deja libre el resto de la calle.
       const offset = rng.int(1, BLOCK_SIZE - 4);
-      const lane = rng.chance(0.5) ? 0 : 2;
+      const lane = rng.chance(0.5) ? 0 : STREET_WIDTH - 2;
       const { x, y } = toTiles(along + offset, across + lane);
       const w = edge.dir === 'h' ? 3 : 2;
       const h = edge.dir === 'h' ? 2 : 3;

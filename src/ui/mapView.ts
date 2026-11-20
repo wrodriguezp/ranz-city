@@ -6,7 +6,7 @@
 // la radio de evacuación.
 //
 // Truco de dibujo: la grilla descubierta se pinta en un canvas chico de 1 píxel por tile
-// (132 × 132). Ese canvas se dibuja agrandado y rotado en el minimapa: la GPU del navegador
+// (~150 × 150). Ese canvas se dibuja agrandado y rotado en el minimapa: la GPU del navegador
 // hace el escalado y no hay que redibujar miles de rectángulos por cuadro.
 //
 // Rotación: la cámara isométrica mira en diagonal, así que "arriba en la pantalla" es la

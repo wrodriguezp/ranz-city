@@ -75,6 +75,8 @@ export type GameEvent =
   | { type: 'blood'; x: number; y: number }
   | { type: 'hurt'; damage: number }
   | { type: 'alarm'; x: number; y: number }
+  /** Sonidos sueltos: la lógica solo avisa QUÉ sonó y DÓNDE; el audio decide cómo suena. */
+  | { type: 'sfx'; name: SfxName; x: number; y: number }
   | { type: 'message'; text: string; tone?: 'info' | 'danger' | 'good' };
 
 export interface Inventory {
@@ -113,3 +115,15 @@ export interface GameState {
   stats: GameStats;
   events: GameEvent[];
 }
+
+export type SfxName =
+  | 'step'
+  | 'reload'
+  | 'empty'
+  | 'takedown'
+  | 'spotted'
+  | 'pickup'
+  | 'horde'
+  | 'helicopter'
+  | 'medkit'
+  | 'battery';

@@ -44,6 +44,8 @@ const SLEEP_DISTANCE = 48;
 const SIGHT_DARK = 6;
 const SIGHT_LIT = 19;
 const VIEW_CONE = (150 * Math.PI) / 180;
+/** Agachado te ven a esta fracción de la distancia normal (más chico = más difícil verte). */
+const SNEAK_SIGHT = 0.55;
 /** Segundos sin ver al jugador antes de rendirse y quedar "investigando" su última posición. */
 const LOSE_INTEREST = 6;
 
@@ -357,10 +359,12 @@ function think(
   sight: number,
 ): void {
   const thinkDt = THINK_EVERY / 60;
-  const range = z.kind === 'tank' ? sight + 2 : sight;
+  const sneaking = state.player.sneaking;
+  const range = (z.kind === 'tank' ? sight + 2 : sight) * (sneaking ? SNEAK_SIGHT : 1);
   // Primero lo barato (distancia y ángulo); el rayo, solo si hace falta.
+  // Muy cerca te "sienten" aunque no te miren, salvo que vayas agachado.
   const inCone =
-    dist < 3 ||
+    dist < (sneaking ? 1.2 : 3) ||
     z.mode === 'chase' ||
     z.mode === 'investigate' ||
     angleBetween(z.facing, Math.atan2(toY, toX)) < VIEW_CONE / 2;
@@ -371,6 +375,7 @@ function think(
     z.targetX = state.player.x;
     z.targetY = state.player.y;
     if (z.mode !== 'chase' && z.mode !== 'charge' && z.mode !== 'stunned') {
+      state.events.push({ type: 'sfx', name: 'spotted', x: z.x, y: z.y });
       z.mode = 'chase';
       z.timer = z.kind === 'tank' ? 1.5 : 0;
     }
@@ -462,6 +467,7 @@ export function updateHordes(state: GameState, rt: ZombieRuntime, dt: number, da
   state.noiseHeat = 0;
   const size = Math.round(14 + 14 * danger);
   if (spawnHorde(state, rt, size)) {
+    state.events.push({ type: 'sfx', name: 'horde', x: state.player.x, y: state.player.y });
     state.events.push({
       type: 'message',
       text: byNoise ? '¡El ruido atrajo una horda!' : '¡Se acerca una horda!',

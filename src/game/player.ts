@@ -8,6 +8,8 @@ import { moveCircle } from './collision';
 export const PLAYER_SPEED = 5.5;
 export const PLAYER_RADIUS = 0.4;
 export const PLAYER_MAX_HP = 100;
+/** Agachado se camina a menos de la mitad de velocidad, a cambio de no hacer ruido al pisar. */
+export const SNEAK_SPEED_FACTOR = 0.45;
 
 export interface PlayerState {
   x: number;
@@ -20,6 +22,10 @@ export interface PlayerState {
   knockY: number;
   /** Segundos desde el último daño (para el efecto rojo de la pantalla). */
   hurtTimer: number;
+  /** Modo sigilo (Shift mantenido). */
+  sneaking: boolean;
+  /** Distancia caminada desde el último paso (para el sonido y el ruido de las pisadas). */
+  stride: number;
 }
 
 export interface PlayerIntent {
@@ -29,21 +35,25 @@ export interface PlayerIntent {
   /** Punto del suelo al que apunta el mouse, en tiles. */
   aimX: number;
   aimY: number;
+  sneak: boolean;
 }
 
 export function createPlayer(x: number, y: number): PlayerState {
-  return { x, y, facing: 0, hp: PLAYER_MAX_HP, knockX: 0, knockY: 0, hurtTimer: 99 };
+  return { x, y, facing: 0, hp: PLAYER_MAX_HP, knockX: 0, knockY: 0, hurtTimer: 99, sneaking: false, stride: 0 };
 }
 
 export function updatePlayer(player: PlayerState, intent: PlayerIntent, grid: TileGrid, dt: number): void {
+  player.sneaking = intent.sneak;
+  const speed = PLAYER_SPEED * (intent.sneak ? SNEAK_SPEED_FACTOR : 1);
   const moved = moveCircle(
     grid,
     player.x,
     player.y,
     PLAYER_RADIUS,
-    (intent.moveX * PLAYER_SPEED + player.knockX) * dt,
-    (intent.moveY * PLAYER_SPEED + player.knockY) * dt,
+    (intent.moveX * speed + player.knockX) * dt,
+    (intent.moveY * speed + player.knockY) * dt,
   );
+  player.stride += Math.hypot(moved.x - player.x, moved.y - player.y);
   // El empujón decae exponencialmente: ~90% menos en un cuarto de segundo.
   const decay = Math.exp(-9 * dt);
   player.knockX *= decay;

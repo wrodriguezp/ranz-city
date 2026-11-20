@@ -96,3 +96,11 @@ canvas { cursor: crosshair; }
 #screen .stats b { font-size: 26px; }
 #screen .action { margin-top: 18px; color: #fff; }
 #screen .action b { color: #ffb347; }
+
+#game-hud .stealth {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  font: 12px system-ui, sans-serif; letter-spacing: 2px; text-transform: uppercase;
+}
+#game-hud .stealth .dim { color: #555; }
+#game-hud .stealth .hidden { color: #8fd0ff; }
+#game-hud .stealth .seen { color: #ff6b5b; font-weight: bold; }

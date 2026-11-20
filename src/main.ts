@@ -24,6 +24,7 @@ import { NightLighting } from './render/lighting';
 import { PlayerView } from './render/playerView';
 import { ZombieView } from './render/zombieView';
 import { Hud } from './ui/hud';
+import { Sfx } from './audio/sfx';
 import { generateCity, type City } from './world/city';
 
 // --- Render ---------------------------------------------------------------------------------
@@ -83,6 +84,7 @@ scene.add(zombieView.root);
 const effects = new EffectsView(lighting);
 scene.add(effects.root);
 const gameHud = new Hud();
+const sfx = new Sfx();
 let propsView: PropsView | undefined;
 let mapView: MapView | undefined;
 let evacView: EvacView | undefined;
@@ -208,6 +210,7 @@ function readIntent(): Intent {
     changeBattery: input.consume('KeyB'),
     useMedkit: input.consume('KeyH'),
     search: input.isDown('KeyE'),
+    sneak: input.isDown('ShiftLeft') || input.isDown('ShiftRight'),
     attack: input.consume('Mouse0'),
     melee: input.consume('Mouse2') || input.consume('Space'),
     reload: input.consume('KeyR'),
@@ -283,6 +286,10 @@ function frame(now: number): void {
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
     // Los eventos de los pasos de este cuadro: efectos y mensajes, y después se descartan.
+    const axes = gameCamera.screenAxesOnGround();
+    const listener = { x, y, rightX: axes.rightX, rightY: axes.rightY };
+    sfx.handle(state.events, listener);
+    if (!screens.current) sfx.ambient(frameDt, listener, state.zombies, state.player.hp);
     effects.handle(state.events, city.seed % 1000);
     gameHud.handle(state.events, now / 1000);
     state.events.length = 0;
@@ -361,6 +368,9 @@ window.addEventListener('keydown', (event) => {
     case 'KeyM':
       if (mode === 'play' && mapView) mapView.setOpen(!mapView.open);
       break;
+    case 'KeyO':
+      gameHud.flash(sfx.toggleMute() ? 'Sonido apagado [O]' : 'Sonido encendido [O]');
+      break;
     case 'KeyG':
       if (cityView) cityView.graphOverlay.visible = !cityView.graphOverlay.visible;
       break;
@@ -432,6 +442,17 @@ function evacLines(): { text: string; tone: 'open' | 'soon' | 'closed' | 'always
   });
 }
 
+// Rueda del mouse: acercar o alejar la cámara de juego (en la vista de revisión la usa OrbitControls).
+renderer.domElement.addEventListener(
+  'wheel',
+  (event) => {
+    if (mode !== 'play') return;
+    event.preventDefault();
+    gameCamera.zoom(Math.sign(event.deltaY));
+  },
+  { passive: false },
+);
+
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   resizeCameras();
@@ -444,3 +465,15 @@ loadCity(new URLSearchParams(window.location.search).get('seed') || randomSeed()
 // en vez de uno por cuadro (60 por segundo) sobre un estado incompleto.
 lastTime = performance.now();
 renderer.setAnimationLoop(frame);
+
+// Solo en desarrollo: acceso al estado desde la consola del navegador para depurar.
+if (import.meta.env.DEV) {
+  (window as unknown as { __zc: unknown }).__zc = {
+    get state() {
+      return state;
+    },
+    get city() {
+      return city;
+    },
+  };
+}

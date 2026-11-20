@@ -19,7 +19,8 @@ const CONTROLS = `
     <div><b>Q</b> cambiar arma (1 bate · 2 pistola)</div><div><b>R</b> recargar</div>
     <div><b>F</b> linterna</div><div><b>B</b> cambiar batería</div>
     <div><b>H</b> botiquín</div><div><b>E</b> (mantener) revisar autos, cajas y cuerpos</div>
-    <div><b>M</b> mapa</div><div><b>Esc</b> pausa</div>
+    <div><b>Shift</b> (mantener) sigilo: lento y silencioso</div><div><b>Rueda</b> acercar / alejar</div>
+    <div><b>M</b> mapa</div><div><b>Esc</b> pausa · <b>O</b> sonido</div>
   </div>`;
 
 export class Screens {

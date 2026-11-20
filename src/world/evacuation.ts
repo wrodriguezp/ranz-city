@@ -5,7 +5,7 @@
 // Así la salida cercana es una apuesta (¿llego a tiempo?) y nunca te quedas sin opciones.
 //
 // Cómo se calcula (todo determinista a partir del mapa, sin azar):
-//  1. Distancia de cada salida = largo de la ruta más corta en tramos × 16 tiles.
+//  1. Distancia de cada salida = largo de la ruta más corta en tramos × (manzana + calle) tiles.
 //  2. Tiempo de viaje "a pie limpio" = distancia / velocidad del jugador.
 //  3. Hora límite = viaje × 5 + 3 minutos de colchón. El ×5 es para pelear, revisar autos,
 //     rodear barricadas... El reloj es para presionar, no para impedir jugar.

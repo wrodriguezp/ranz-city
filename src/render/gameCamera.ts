@@ -2,8 +2,10 @@
 
 import * as THREE from 'three';
 
-/** Cuántos tiles caben en el alto de la pantalla. Más chico = más cerca. */
-const VIEW_HEIGHT = 36;
+/** Cuántos tiles caben en el alto de la pantalla. Más chico = más cerca. La rueda lo cambia. */
+const VIEW_HEIGHT = 28;
+const MIN_VIEW_HEIGHT = 18;
+const MAX_VIEW_HEIGHT = 40;
 /** Giro horizontal de la cámara: 45° es el ángulo isométrico clásico. */
 const YAW = Math.PI / 4;
 /**
@@ -27,6 +29,8 @@ export class GameCamera {
   private readonly raycaster = new THREE.Raycaster();
   private readonly ground = new THREE.Plane(new THREE.Vector3(0, 1, 0), 0);
   private readonly hit = new THREE.Vector3();
+  private viewHeight = VIEW_HEIGHT;
+  private aspect = 1;
 
   constructor() {
     // Coordenadas esféricas: el offset apunta "hacia atrás y arriba" desde el foco.
@@ -39,11 +43,22 @@ export class GameCamera {
   }
 
   resize(aspect: number): void {
-    this.camera.left = (-VIEW_HEIGHT * aspect) / 2;
-    this.camera.right = (VIEW_HEIGHT * aspect) / 2;
-    this.camera.top = VIEW_HEIGHT / 2;
-    this.camera.bottom = -VIEW_HEIGHT / 2;
+    this.aspect = aspect;
+    const h = this.viewHeight;
+    this.camera.left = (-h * aspect) / 2;
+    this.camera.right = (h * aspect) / 2;
+    this.camera.top = h / 2;
+    this.camera.bottom = -h / 2;
     this.camera.updateProjectionMatrix();
+  }
+
+  /**
+   * Acercar o alejar (rueda del mouse). En una cámara ortográfica no hay "distancia" que cambie
+   * el tamaño: se agranda o achica la ventana de visión (cuántos tiles caben en pantalla).
+   */
+  zoom(steps: number): void {
+    this.viewHeight = THREE.MathUtils.clamp(this.viewHeight * Math.pow(1.1, steps), MIN_VIEW_HEIGHT, MAX_VIEW_HEIGHT);
+    this.resize(this.aspect);
   }
 
   /** Dirección normalizada desde la escena hacia la cámara (paralela a todos los rayos de visión). */

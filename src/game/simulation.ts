@@ -15,7 +15,7 @@ import { FlowField } from './flowField';
 import { createPlayer, PLAYER_MAX_HP, updatePlayer } from './player';
 import { SpatialHash } from './spatialHash';
 import type { GameState } from './state';
-import { createZombie, initialHordeTimer, updateHordes, updateZombies, type ZombieRuntime } from './zombies';
+import { createZombie, initialHordeTimer, makeNoise, updateHordes, updateZombies, type ZombieRuntime } from './zombies';
 
 /** Estructuras auxiliares que se derivan del mundo y del estado: no se serializan. */
 export type Runtime = ZombieRuntime;
@@ -31,7 +31,14 @@ export interface Intent extends CombatIntent {
   useMedkit: boolean;
   /** E mantenida: revisar el contenedor cercano. */
   search: boolean;
+  /** Shift mantenido: agachado. */
+  sneak: boolean;
 }
+
+/** Cada cuántos tiles caminados suena una pisada. */
+const STRIDE = 1.6;
+/** Las pisadas normales se oyen a unos pocos tiles: alcanza para despertar al que está al lado. */
+const FOOTSTEP_NOISE = 4.5;
 
 const MEDKIT_HEAL = 60;
 
@@ -81,6 +88,7 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   state.tick++;
 
   updatePlayer(state.player, intent, rt.city.grid, dt);
+  footsteps(state);
 
   updateItems(state, intent);
   updateFlashlight(state.flashlight, dt);
@@ -101,6 +109,18 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   }
 }
 
+/**
+ * Pisadas. Caminando normal, cada paso es un ruido chico: los zombies muy cercanos lo oyen
+ * aunque no te vean. Agachado (Shift) los pasos no hacen ruido: es la base del sigilo.
+ */
+function footsteps(state: GameState): void {
+  const p = state.player;
+  if (p.stride < STRIDE) return;
+  p.stride = 0;
+  state.events.push({ type: 'sfx', name: 'step', x: p.x, y: p.y });
+  if (!p.sneaking) makeNoise(state, p.x, p.y, FOOTSTEP_NOISE);
+}
+
 /** Linterna, baterías y botiquines. */
 function updateItems(state: GameState, intent: Intent): void {
   const { flashlight, inventory, player } = state;
@@ -112,6 +132,7 @@ function updateItems(state: GameState, intent: Intent): void {
     inventory.batteries--;
     flashlight.charge = 100;
     state.events.push({ type: 'message', text: 'Batería nueva en la linterna', tone: 'good' });
+    state.events.push({ type: 'sfx', name: 'battery', x: player.x, y: player.y });
   } else if (intent.changeBattery && inventory.batteries === 0) {
     state.events.push({ type: 'message', text: 'No tienes baterías de repuesto' });
   }
@@ -125,6 +146,7 @@ function updateItems(state: GameState, intent: Intent): void {
       inventory.medkits--;
       player.hp = Math.min(PLAYER_MAX_HP, player.hp + MEDKIT_HEAL);
       state.events.push({ type: 'message', text: `+${MEDKIT_HEAL} de vida`, tone: 'good' });
+      state.events.push({ type: 'sfx', name: 'medkit', x: player.x, y: player.y });
     }
   }
 }

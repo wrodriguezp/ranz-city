@@ -14,12 +14,15 @@ import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js
 import type { GameState, Zombie } from '../game/state';
 import { lineOfSight } from '../game/visibility';
 import type { TileGrid } from '../world/tileGrid';
+import { BUILDING_STENCIL } from './cityRenderer';
 
 const MAX_WALKERS = 600;
 const MAX_TANKS = 8;
 const MAX_CORPSES = 300;
 /** Más lejos que esto ni siquiera se prueba la línea de visión (queda fuera de pantalla). */
 const DRAW_DISTANCE = 34;
+/** Hasta dónde se ve la silueta de un zombie tapado por un edificio. */
+const GHOST_DISTANCE = 20;
 
 function zombieGeometry(radius: number, height: number, armLength: number): THREE.BufferGeometry {
   const body = new THREE.CapsuleGeometry(radius, height - radius * 2, 4, 10);
@@ -38,6 +41,9 @@ export class ZombieView {
   private readonly walkers: THREE.InstancedMesh;
   private readonly tanks: THREE.InstancedMesh;
   private readonly corpses: THREE.InstancedMesh;
+  /** Copias de los zombies que solo se dibujan donde algo los TAPA (ver constructor). */
+  private readonly walkerGhosts: THREE.InstancedMesh;
+  private readonly tankGhosts: THREE.InstancedMesh;
   private readonly matrix = new THREE.Matrix4();
   private readonly quaternion = new THREE.Quaternion();
   private readonly position = new THREE.Vector3();
@@ -61,6 +67,35 @@ export class ZombieView {
       mesh.setColorAt(0, this.color.setHex(0xffffff));
     }
 
+    // Siluetas a través de los edificios. Con la cámara en diagonal, un edificio puede tapar
+    // a un zombie que el jugador SÍ tiene a la vista (están en la misma calle, pero el bloque
+    // queda entre él y la cámara). Truco: dibujamos cada zombie otra vez con depthFunc =
+    // GreaterDepth, es decir, "píntate solo donde haya algo MÁS CERCA de la cámara que tú".
+    // Donde el zombie se ve normal, esa prueba falla y no se dibuja nada extra; donde lo tapa
+    // una pared, aparece su silueta roja sobre la pared.
+    // Con eso solo, el propio cuerpo del zombie "tapa" sus brazos y los teñiría de rojo. Por eso
+    // además se exige que el píxel sea de un EDIFICIO, usando la marca que dejan en el stencil.
+    const ghostMaterial = new THREE.MeshBasicMaterial({
+      transparent: true,
+      opacity: 0.55,
+      depthWrite: false,
+      depthFunc: THREE.GreaterDepth,
+      stencilWrite: true,
+      stencilRef: BUILDING_STENCIL,
+      stencilFunc: THREE.EqualStencilFunc,
+      stencilFail: THREE.KeepStencilOp,
+      stencilZFail: THREE.KeepStencilOp,
+      stencilZPass: THREE.KeepStencilOp,
+    });
+    this.walkerGhosts = new THREE.InstancedMesh(this.walkers.geometry, ghostMaterial, MAX_WALKERS);
+    this.tankGhosts = new THREE.InstancedMesh(this.tanks.geometry, ghostMaterial.clone(), MAX_TANKS);
+    for (const mesh of [this.walkerGhosts, this.tankGhosts]) {
+      mesh.count = 0;
+      mesh.frustumCulled = false;
+      mesh.renderOrder = 5;
+      mesh.setColorAt(0, this.color.setHex(0xffffff));
+    }
+
     const corpseGeometry = new THREE.BoxGeometry(1.3, 0.22, 0.6);
     corpseGeometry.translate(0, 0.11, 0);
     this.corpses = new THREE.InstancedMesh(
@@ -72,7 +107,7 @@ export class ZombieView {
     this.corpses.receiveShadow = true;
     this.corpses.frustumCulled = false;
 
-    this.root.add(this.walkers, this.tanks, this.corpses);
+    this.root.add(this.walkers, this.tanks, this.corpses, this.walkerGhosts, this.tankGhosts);
   }
 
   /** alpha: fracción entre el paso anterior y el actual, para interpolar posiciones. */
@@ -85,14 +120,23 @@ export class ZombieView {
       const y = z.prevY + (z.y - z.prevY) * alpha;
       if (Math.abs(x - viewerX) > DRAW_DISTANCE || Math.abs(y - viewerY) > DRAW_DISTANCE) continue;
       if (!lineOfSight(grid, viewerX, viewerY, x, y)) continue;
+      // La silueta se apaga con la distancia: lo lejano y oscuro sigue siendo una amenaza invisible.
+      const d = Math.hypot(x - viewerX, y - viewerY);
+      const ghost = Math.max(0, 1 - d / GHOST_DISTANCE);
       if (z.kind === 'tank') {
-        if (tanks < MAX_TANKS) this.write(this.tanks, tanks++, z, x, y);
+        if (tanks < MAX_TANKS) {
+          this.writeGhost(this.tankGhosts, tanks, ghost);
+          this.write(this.tanks, tanks++, z, x, y);
+        }
       } else if (walkers < MAX_WALKERS) {
+        this.writeGhost(this.walkerGhosts, walkers, ghost);
         this.write(this.walkers, walkers++, z, x, y);
       }
     }
     this.finish(this.walkers, walkers);
     this.finish(this.tanks, tanks);
+    this.finish(this.walkerGhosts, walkers);
+    this.finish(this.tankGhosts, tanks);
     this.updateCorpses(state);
   }
 
@@ -101,6 +145,8 @@ export class ZombieView {
     this.position.set(x, 0, y);
     this.matrix.compose(this.position, this.quaternion, this.scale);
     mesh.setMatrixAt(index, this.matrix);
+    const ghost = mesh === this.walkers ? this.walkerGhosts : this.tankGhosts;
+    ghost.setMatrixAt(index, this.matrix);
 
     if (z.hitFlash > 0) {
       this.color.setHex(0xffffff);
@@ -111,6 +157,12 @@ export class ZombieView {
       const t = ((z.id * 0.618034) % 1 + 1) % 1;
       this.color.setRGB(0.36 + t * 0.12, 0.42 + t * 0.05, 0.3 - t * 0.06);
     }
+    mesh.setColorAt(index, this.color);
+  }
+
+  /** La silueta usa la misma matriz que el zombie (se escribe justo después, ver write). */
+  private writeGhost(mesh: THREE.InstancedMesh, index: number, strength: number): void {
+    this.color.setRGB(0.75 * strength, 0.12 * strength, 0.08 * strength);
     mesh.setColorAt(index, this.color);
   }
 
@@ -141,6 +193,10 @@ export class ZombieView {
   }
 
   dispose(): void {
+    for (const mesh of [this.walkerGhosts, this.tankGhosts]) {
+      (mesh.material as THREE.Material).dispose();
+      mesh.dispose();
+    }
     for (const mesh of [this.walkers, this.tanks, this.corpses]) {
       mesh.geometry.dispose();
       (mesh.material as THREE.Material).dispose();

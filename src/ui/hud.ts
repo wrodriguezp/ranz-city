@@ -22,6 +22,7 @@ export class Hud {
   private readonly vignette: HTMLElement;
   private readonly prompt: HTMLElement;
   private readonly evac: HTMLElement;
+  private readonly stealth: HTMLElement;
   private readonly cache = new Map<HTMLElement, string>();
   private readonly live: { el: HTMLElement; until: number }[] = [];
 
@@ -32,6 +33,7 @@ export class Hud {
       <div class="vignette"></div>
       <div class="messages"></div>
       <div class="prompt"></div>
+      <div class="stealth"></div>
       <div class="panel evac"></div>
       <div class="panel status">
         <div class="row"><span class="label">VIDA</span><div class="bar"><div class="fill health"></div></div><span class="num health-text"></span></div>
@@ -51,10 +53,16 @@ export class Hud {
     this.vignette = q('.vignette');
     this.prompt = q('.prompt');
     this.evac = q('.evac');
+    this.stealth = q('.stealth');
   }
 
   setVisible(visible: boolean): void {
     this.root.style.display = visible ? '' : 'none';
+  }
+
+  /** Mensaje informativo que no viene de la simulación (p. ej. sonido on/off). */
+  flash(text: string): void {
+    this.handle([{ type: 'message', text }], performance.now() / 1000);
   }
 
   /** Mensajes y sacudidas a partir de los eventos del paso. */
@@ -117,6 +125,16 @@ export class Hud {
       this.items,
       `botiquines <b>${inv.medkits}</b> [H] · baterías <b>${inv.batteries}</b> [B] · muertes <b>${state.stats.kills}</b>`,
     );
+
+    // Sigilo: ¿cuántos te están persiguiendo? Si ninguno, estás oculto.
+    let hunting = 0;
+    for (const z of state.zombies) if (z.hp > 0 && (z.mode === 'chase' || z.mode === 'charge')) hunting++;
+    const stealthHtml = hunting
+      ? `<span class="seen">TE VIERON · ${hunting}</span>`
+      : p.sneaking
+        ? `<span class="hidden">SIGILO · oculto</span>`
+        : `<span class="dim">oculto</span>`;
+    this.set(this.stealth, stealthHtml);
 
     // Viñeta roja al recibir daño, y permanente (suave) con poca vida.
     const hurt = Math.max(0, 1 - p.hurtTimer / 0.5);

@@ -68,6 +68,7 @@ export function updateEscape(state: GameState, rt: ZombieRuntime, points: readon
       if (point.kind === 'helicopter' && !escape.finale) {
         escape.finale = true;
         spawnHorde(state, rt, FINALE_HORDE);
+        state.events.push({ type: 'sfx', name: 'helicopter', x: point.x, y: point.y });
         state.events.push({ type: 'message', text: 'El ruido del helicóptero atrae a toda la ciudad', tone: 'danger' });
       }
       escape.progress[i] = Math.min(1, escape.progress[i] + dt / point.hold);
