@@ -7,6 +7,7 @@
 
 import type { WeaponState } from './combat';
 import type { FlashlightState } from './flashlight';
+import type { LootState } from './loot';
 import type { PlayerState } from './player';
 
 export type ZombieKind = 'walker' | 'tank';
@@ -72,6 +73,7 @@ export type GameEvent =
   | { type: 'swing'; x: number; y: number; facing: number }
   | { type: 'blood'; x: number; y: number }
   | { type: 'hurt'; damage: number }
+  | { type: 'alarm'; x: number; y: number }
   | { type: 'message'; text: string; tone?: 'info' | 'danger' | 'good' };
 
 export interface Inventory {
@@ -98,6 +100,7 @@ export interface GameState {
   flashlight: FlashlightState;
   weapon: WeaponState;
   inventory: Inventory;
+  loot: LootState;
   zombies: Zombie[];
   nextZombieId: number;
   corpses: Corpse[];

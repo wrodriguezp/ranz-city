@@ -12,6 +12,9 @@ import { createGameState, createRuntime, stepGame, type Intent, type Runtime } f
 import type { GameState } from './game/state';
 import { buildCityView, type CityView } from './render/cityRenderer';
 import { EffectsView } from './render/effectsView';
+import { PropsView } from './render/propsView';
+import { searchPrompt } from './game/loot';
+import { MapView, type ExitMarker } from './ui/mapView';
 import { GameCamera } from './render/gameCamera';
 import { NightLighting } from './render/lighting';
 import { PlayerView } from './render/playerView';
@@ -76,6 +79,8 @@ scene.add(zombieView.root);
 const effects = new EffectsView(lighting);
 scene.add(effects.root);
 const gameHud = new Hud();
+let propsView: PropsView | undefined;
+let mapView: MapView | undefined;
 
 // Solo en desarrollo: acceso desde la consola del navegador para depurar y medir rendimiento.
 if (import.meta.env.DEV) {
@@ -106,6 +111,13 @@ function loadCity(seedText: string): void {
   cityView.graphOverlay.visible = graphVisible;
   scene.add(cityView.root);
 
+  if (propsView) {
+    scene.remove(propsView.root);
+    propsView.dispose();
+  }
+  propsView = new PropsView(city.props);
+  scene.add(propsView.root);
+
   startGame();
   resetReviewCamera();
 
@@ -126,6 +138,9 @@ function startGame(): void {
   input.clearPressed();
   effects.reset();
   gameHud.clearMessages();
+  if (mapView) mapView.reset(city);
+  else mapView = new MapView(city);
+  mapView.setVisible(mode === 'play');
   gameCamera.snapTo(state.player.x, state.player.y);
 }
 
@@ -148,6 +163,7 @@ function randomSeed(): string {
 function setMode(next: Mode): void {
   mode = next;
   gameHud.setVisible(mode === 'play');
+  mapView?.setVisible(mode === 'play');
   reviewControls.enabled = mode === 'review';
   lighting.setDaylight(mode === 'review');
 }
@@ -172,6 +188,7 @@ function readIntent(): Intent {
     toggleFlashlight: input.consume('KeyF'),
     changeBattery: input.consume('KeyB'),
     useMedkit: input.consume('KeyH'),
+    search: input.isDown('KeyE'),
     attack: input.consume('Mouse0'),
     melee: input.consume('Mouse2') || input.consume('Space'),
     reload: input.consume('KeyR'),
@@ -250,6 +267,10 @@ function frame(now: number): void {
     state.events.length = 0;
     effects.update(frameDt);
     gameHud.update(state, now / 1000);
+    propsView?.update(state, now / 1000);
+    const prompt = searchPrompt(state, city.props);
+    gameHud.setPrompt(prompt.text, prompt.progress);
+    mapView?.update(state, frameDt, exitMarkers());
     renderer.render(scene, gameCamera.camera);
   } else {
     playerView.update(state.player.x, state.player.y, state.player.facing);
@@ -317,6 +338,9 @@ window.addEventListener('keydown', (event) => {
     case 'KeyN':
       loadCity(randomSeed());
       break;
+    case 'KeyM':
+      if (mode === 'play' && mapView) mapView.setOpen(!mapView.open);
+      break;
     case 'KeyG':
       if (cityView) cityView.graphOverlay.visible = !cityView.graphOverlay.visible;
       break;
@@ -328,6 +352,11 @@ window.addEventListener('keydown', (event) => {
       break;
   }
 });
+
+/** Rótulos de las salidas para el mapa. */
+function exitMarkers(): ExitMarker[] {
+  return city.layout.exits.map((exit) => ({ label: exit.kind === 'helicopter' ? 'Helicóptero' : 'Carretera' }));
+}
 
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);

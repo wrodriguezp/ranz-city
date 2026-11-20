@@ -7,6 +7,7 @@
 import type { City } from '../world/city';
 import { dangerAt } from '../world/zones';
 import { moveCircle } from './collision';
+import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { createFlashlight, updateFlashlight } from './flashlight';
 import { FlowField } from './flowField';
@@ -27,6 +28,8 @@ export interface Intent extends CombatIntent {
   toggleFlashlight: boolean;
   changeBattery: boolean;
   useMedkit: boolean;
+  /** E mantenida: revisar el contenedor cercano. */
+  search: boolean;
 }
 
 const MEDKIT_HEAL = 60;
@@ -50,6 +53,7 @@ export function createGameState(city: City): GameState {
     flashlight: createFlashlight(),
     weapon: createWeapons(),
     inventory: { medkits: 1, batteries: 1 },
+    loot: createLoot(city.props.length),
     zombies: [],
     nextZombieId: 0,
     corpses: [],
@@ -81,6 +85,7 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
 
   // El combate va antes que los zombies: lo que muere en este paso ya no ataca.
   updateCombat(state, rt, intent, dt);
+  updateLoot(state, rt, intent.search, dt);
 
   rt.field.update(state.player.x, state.player.y);
   updateZombies(state, rt, dt);
