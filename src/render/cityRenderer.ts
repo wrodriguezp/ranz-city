@@ -34,6 +34,8 @@ export interface CityView {
   root: THREE.Group;
   /** Capa de depuración con el grafo (cruces coloreados por distancia y tramos abiertos). */
   graphOverlay: THREE.Group;
+  /** Columna de luz de cada salida (índice = layout.exits); se apagan cuando la salida se va. */
+  exitBeacons: THREE.Mesh[];
   /**
    * Vuelve semitransparentes los edificios que tapan al jugador.
    * toCamera: dirección (normalizada) desde la escena hacia la cámara. Sin argumentos, no oculta ninguno.
@@ -100,15 +102,14 @@ export function buildCityView(city: City): CityView {
     };
     root.add(boxMesh(unitBox, inner, 0.05, COLORS.plaza));
     root.add(helipad(inner));
-    root.add(beacon(inner.x + inner.w / 2, inner.y + inner.h / 2, COLORS.exit));
   }
 
-  // Salidas por carretera y punto de inicio: columnas de luz visibles desde lejos.
-  const { graph } = city.layout;
-  for (const exit of city.layout.exits) {
-    if (exit.kind !== 'road' || exit.node === undefined) continue;
-    root.add(beacon(nodeCenter(graph.nodeX(exit.node)), nodeCenter(graph.nodeY(exit.node)), COLORS.exit));
-  }
+  // Salidas y punto de inicio: columnas de luz visibles desde lejos (en el orden de layout.exits).
+  const exitBeacons = city.evac.map((point) => {
+    const mesh = beacon(point.x, point.y, point.kind === 'helicopter' ? COLORS.helipad : COLORS.exit);
+    root.add(mesh);
+    return mesh;
+  });
   root.add(beacon(city.spawn.x, city.spawn.y, COLORS.start));
 
   // Muro perimetral: el límite de la ciudad.
@@ -130,6 +131,7 @@ export function buildCityView(city: City): CityView {
   return {
     root,
     graphOverlay,
+    exitBeacons,
     updateOcclusion: occlusion.update,
     dispose() {
       // Three.js no libera memoria de la GPU solo: hay que liberar geometrías y materiales a mano.

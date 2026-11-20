@@ -8,6 +8,7 @@ import { generateLayout, type CityLayout } from './cityLayout';
 import { planEncounters, type EncounterPlan } from './encounters';
 import { hashString, Rng } from './rng';
 import { buildTileGrid, nodeCenter, type TileGrid } from './tileGrid';
+import { planEvacuation, type EvacPoint } from './evacuation';
 import { placeProps, type Container } from './props';
 import { computeZones, type ZoneMap } from './zones';
 
@@ -25,6 +26,8 @@ export interface City {
   zones: ZoneMap;
   /** Autos, cajas y cuerpos con su loot. */
   props: Container[];
+  /** Zonas de evacuación con su hora límite. */
+  evac: EvacPoint[];
   /** Huella de la ciudad generada, para comprobar a simple vista que la generación es determinista. */
   fingerprint: string;
 }
@@ -53,7 +56,9 @@ export function generateCity(seedText: string): City {
   const props = placeProps(grid, layout, zones, spawn, rng.fork('props'));
   const encounters = planEncounters(grid, layout, zones, spawn, rng.fork('encounters'));
 
-  return { seedText, seed, layout, grid, spawn, encounters, zones, props, fingerprint: fingerprintOf(grid) };
+  const evac = planEvacuation(layout);
+
+  return { seedText, seed, layout, grid, spawn, encounters, zones, props, evac, fingerprint: fingerprintOf(grid) };
 }
 
 /** Hash FNV-1a de los tiles y las alturas de los edificios. */

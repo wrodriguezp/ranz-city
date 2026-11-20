@@ -7,6 +7,7 @@
 import type { City } from '../world/city';
 import { dangerAt } from '../world/zones';
 import { moveCircle } from './collision';
+import { createEscape, updateEscape } from './escape';
 import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { createFlashlight, updateFlashlight } from './flashlight';
@@ -54,6 +55,7 @@ export function createGameState(city: City): GameState {
     weapon: createWeapons(),
     inventory: { medkits: 1, batteries: 1 },
     loot: createLoot(city.props.length),
+    escape: createEscape(city.evac),
     zombies: [],
     nextZombieId: 0,
     corpses: [],
@@ -90,6 +92,8 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   rt.field.update(state.player.x, state.player.y);
   updateZombies(state, rt, dt);
   updateHordes(state, rt, dt, dangerAt(rt.city.zones, state.player.x, state.player.y));
+
+  updateEscape(state, rt, rt.city.evac, dt);
 
   if (state.player.hp <= 0 && state.status === 'playing') {
     state.status = 'lost';

@@ -6,6 +6,7 @@
 // mande este estado a los demás jugadores.
 
 import type { WeaponState } from './combat';
+import type { EscapeState } from './escape';
 import type { FlashlightState } from './flashlight';
 import type { LootState } from './loot';
 import type { PlayerState } from './player';
@@ -101,6 +102,7 @@ export interface GameState {
   weapon: WeaponState;
   inventory: Inventory;
   loot: LootState;
+  escape: EscapeState;
   zombies: Zombie[];
   nextZombieId: number;
   corpses: Corpse[];

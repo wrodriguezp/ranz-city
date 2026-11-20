@@ -21,6 +21,7 @@ export class Hud {
   private readonly messages: HTMLElement;
   private readonly vignette: HTMLElement;
   private readonly prompt: HTMLElement;
+  private readonly evac: HTMLElement;
   private readonly cache = new Map<HTMLElement, string>();
   private readonly live: { el: HTMLElement; until: number }[] = [];
 
@@ -31,6 +32,7 @@ export class Hud {
       <div class="vignette"></div>
       <div class="messages"></div>
       <div class="prompt"></div>
+      <div class="panel evac"></div>
       <div class="panel status">
         <div class="row"><span class="label">VIDA</span><div class="bar"><div class="fill health"></div></div><span class="num health-text"></span></div>
         <div class="row"><span class="label">LUZ</span><div class="bar"><div class="fill battery"></div></div><span class="num battery-text"></span></div>
@@ -48,6 +50,7 @@ export class Hud {
     this.messages = q('.messages');
     this.vignette = q('.vignette');
     this.prompt = q('.prompt');
+    this.evac = q('.evac');
   }
 
   setVisible(visible: boolean): void {
@@ -79,6 +82,14 @@ export class Hud {
       : '';
     this.set(this.prompt, html);
     this.prompt.style.display = text ? '' : 'none';
+  }
+
+  /** Reloj y salidas (panel bajo el minimapa). */
+  setEvac(clock: string, lines: { text: string; tone: string }[]): void {
+    this.set(
+      this.evac,
+      `<div class="clock">${clock}</div>` + lines.map((l) => `<div class="exit ${l.tone}">${l.text}</div>`).join(''),
+    );
   }
 
   update(state: GameState, now: number): void {

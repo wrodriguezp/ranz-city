@@ -69,3 +69,30 @@ canvas { cursor: crosshair; }
 }
 #fullmap .title { margin-bottom: 8px; letter-spacing: 2px; }
 #fullmap .dim { color: #888; }
+
+/* --- Evacuación y pantallas ------------------------------------------------------------------ */
+#game-hud .evac { top: 214px; right: 12px; min-width: 190px; text-align: right; }
+#game-hud .evac .clock { font-size: 26px; font-weight: bold; letter-spacing: 2px; color: #fff; margin-bottom: 4px; }
+#game-hud .evac .exit { font-size: 13px; margin-top: 2px; }
+#game-hud .evac .exit.soon { color: #ff7a6b; }
+#game-hud .evac .exit.closed { color: #666; text-decoration: line-through; }
+#game-hud .evac .exit.always { color: #8fe08f; }
+#screen {
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(3, 4, 8, 0.82); color: #ddd; font: 15px system-ui, sans-serif; text-align: center; z-index: 10;
+}
+#screen h1 { font-size: 54px; letter-spacing: 8px; margin: 0 0 12px; color: #ffb347; }
+#screen.lost h1 { color: #ff5a4d; }
+#screen.won h1 { color: #8fe08f; }
+#screen .lead { max-width: 640px; line-height: 1.5; color: #bbb; }
+#screen .seed { margin: 10px 0; color: #999; }
+#screen .seed b { color: #ffb347; font-size: 18px; }
+#screen .controls {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; margin: 18px 0; text-align: left; font-size: 14px;
+}
+#screen .controls b { color: #ffb347; }
+#screen .stats { display: flex; gap: 36px; margin: 16px 0; }
+#screen .stats span { display: block; color: #888; font-size: 12px; }
+#screen .stats b { font-size: 26px; }
+#screen .action { margin-top: 18px; color: #fff; }
+#screen .action b { color: #ffb347; }

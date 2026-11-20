@@ -14,6 +14,10 @@ import { buildCityView, type CityView } from './render/cityRenderer';
 import { EffectsView } from './render/effectsView';
 import { PropsView } from './render/propsView';
 import { searchPrompt } from './game/loot';
+import { exitName } from './game/escape';
+import { EvacView } from './render/evacView';
+import { Screens } from './ui/screens';
+import { clockText } from './world/evacuation';
 import { MapView, type ExitMarker } from './ui/mapView';
 import { GameCamera } from './render/gameCamera';
 import { NightLighting } from './render/lighting';
@@ -81,6 +85,9 @@ scene.add(effects.root);
 const gameHud = new Hud();
 let propsView: PropsView | undefined;
 let mapView: MapView | undefined;
+let evacView: EvacView | undefined;
+const screens = new Screens();
+let firstGame = true;
 
 // Solo en desarrollo: acceso desde la consola del navegador para depurar y medir rendimiento.
 if (import.meta.env.DEV) {
@@ -138,9 +145,21 @@ function startGame(): void {
   input.clearPressed();
   effects.reset();
   gameHud.clearMessages();
+  // Los vehículos de evacuación vuelven a su lugar en cada partida.
+  if (evacView) {
+    scene.remove(evacView.root);
+    evacView.dispose();
+  }
+  if (cityView) {
+    evacView = new EvacView(city.evac, city.grid.width, cityView.exitBeacons);
+    scene.add(evacView.root);
+  }
   if (mapView) mapView.reset(city);
   else mapView = new MapView(city);
   mapView.setVisible(mode === 'play');
+  // La primera partida empieza con la pantalla de controles; las siguientes, directo.
+  screens.show(firstGame ? 'intro' : null, firstGame ? summary() : undefined);
+  firstGame = false;
   gameCamera.snapTo(state.player.x, state.player.y);
 }
 
@@ -244,12 +263,14 @@ function frame(now: number): void {
   }
 
   if (mode === 'play') {
-    accumulator += frameDt;
+    // Con una pantalla abierta (inicio, pausa, fin) la simulación queda congelada.
+    accumulator = screens.current ? 0 : accumulator + frameDt;
     const t0 = performance.now();
     while (accumulator >= STEP) {
       step(STEP);
       accumulator -= STEP;
     }
+    if (state.status !== 'playing' && !screens.current) screens.show(state.status, summary());
     stepMs = stepMs * 0.95 + (performance.now() - t0) * 0.05;
     const alpha = accumulator / STEP;
     const p = state.player;
@@ -271,6 +292,8 @@ function frame(now: number): void {
     const prompt = searchPrompt(state, city.props);
     gameHud.setPrompt(prompt.text, prompt.progress);
     mapView?.update(state, frameDt, exitMarkers());
+    evacView?.update(state, frameDt, now / 1000);
+    gameHud.setEvac(clockText(state.time), evacLines());
     renderer.render(scene, gameCamera.camera);
   } else {
     playerView.update(state.player.x, state.player.y, state.player.facing);
@@ -305,12 +328,9 @@ function updateHud(): void {
     const light = state.flashlight;
     text =
       `<b>ZOMBIE CITY</b> · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
-      `zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s · ruido ${state.noiseHeat.toFixed(1)}\n` +
-      `linterna ${light.on ? 'encendida' : 'apagada'}` +
-      (state.status === 'lost' ? `\n\n<b>TE ALCANZARON</b> · [Enter] reintentar` : '') +
-      `\n\n[WASD] moverse  [mouse] apuntar  [clic] atacar  [clic der./espacio] golpe\n` +
-      `[Q] cambiar arma  [R] recargar  [F] linterna  [B] batería  [H] botiquín\n` +
-      `[V] vista de revisión  [N] nueva seed  [G] grafo`;
+      `zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s · ruido ${state.noiseHeat.toFixed(1)}` +
+      ` · linterna ${light.on ? 'on' : 'off'}\n` +
+      `[Esc] pausa y controles  [V] vista de revisión  [G] grafo`;
   } else {
     const exits = city.layout.exits
       .map((e) => `  ${e.kind === 'helicopter' ? 'helicóptero (plaza)' : 'carretera'}: ${e.distance} tramos`)
@@ -349,13 +369,67 @@ window.addEventListener('keydown', (event) => {
       break;
     case 'Enter':
       if (state.status !== 'playing') startGame();
+      else if (screens.current === 'intro' || screens.current === 'pause') resume();
+      break;
+    case 'Escape':
+      if (mode !== 'play' || state.status !== 'playing') break;
+      if (screens.current === 'pause') resume();
+      else if (!screens.current) {
+        mapView?.setOpen(false);
+        screens.show('pause', summary());
+      }
       break;
   }
 });
 
 /** Rótulos de las salidas para el mapa. */
 function exitMarkers(): ExitMarker[] {
-  return city.layout.exits.map((exit) => ({ label: exit.kind === 'helicopter' ? 'Helicóptero' : 'Carretera' }));
+  return city.evac.map((point) => ({
+    label: point.kind === 'helicopter' ? 'Helicóptero' : 'Carretera',
+    detail: state.escape.departed[point.index] ? 'se fue' : point.deadline === null ? 'espera' : clockText(point.deadline),
+    closed: state.escape.departed[point.index],
+  }));
+}
+
+/** Cierra la pantalla de inicio o de pausa y sigue jugando. */
+function resume(): void {
+  screens.show(null);
+  input.clearPressed();
+}
+
+document.getElementById('screen')!.addEventListener('pointerdown', (event) => {
+  event.stopPropagation();
+  if (screens.current === 'intro' || screens.current === 'pause') resume();
+});
+
+/** Datos para las pantallas de fin (y la seed en las de inicio/pausa). */
+function summary() {
+  const t = Math.floor(state.time);
+  const via = state.escape.escapedVia;
+  return {
+    seed: city.seedText,
+    time: `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`,
+    clock: clockText(state.time),
+    kills: state.stats.kills,
+    shots: state.stats.shots,
+    via: via >= 0 ? exitName(city.evac[via]) : undefined,
+  };
+}
+
+/** Líneas del panel de evacuación: cada salida, su hora y cuánto falta. */
+function evacLines(): { text: string; tone: 'open' | 'soon' | 'closed' | 'always' }[] {
+  return city.evac.map((point) => {
+    const name = point.kind === 'helicopter' ? 'Helicóptero' : 'Carretera';
+    if (state.escape.departed[point.index]) return { text: `${name} · se fue`, tone: 'closed' };
+    if (point.deadline === null) return { text: `${name} · espera`, tone: 'always' };
+    const left = Math.max(0, point.deadline - state.time);
+    const m = Math.floor(left / 60);
+    const s = Math.floor(left % 60);
+    return {
+      text: `${name} · ${clockText(point.deadline)} <span class="dim">(${m}:${String(s).padStart(2, '0')})</span>`,
+      tone: left < 60 ? 'soon' : 'open',
+    };
+  });
 }
 
 window.addEventListener('resize', () => {
