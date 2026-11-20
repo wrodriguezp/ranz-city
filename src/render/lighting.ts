@@ -61,8 +61,8 @@ export class NightLighting {
     const cos = Math.cos(facing);
     const sin = Math.sin(facing);
     this.flashlight.position.set(x + cos * 0.45, FLASHLIGHT_HEIGHT, y + sin * 0.45);
-    // El cono apunta un poco hacia abajo: el centro toca el suelo a unos 12 tiles.
-    this.flashlight.target.position.set(x + cos * 12, 0, y + sin * 12);
+    // El cono apunta un poco hacia abajo: el centro toca el suelo a unos 9 tiles.
+    this.flashlight.target.position.set(x + cos * 9, 0, y + sin * 9);
     this.flashlight.intensity = FLASHLIGHT_INTENSITY * power;
     // Con poca batería el alcance también se acorta.
     this.flashlight.distance = FLASHLIGHT_RANGE * (0.55 + 0.45 * Math.min(1, power));

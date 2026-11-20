@@ -6,13 +6,15 @@
 
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { flashlightPower } from './game/flashlight';
 import { Input } from './game/input';
-import { createFlashlight, flashlightPower, updateFlashlight } from './game/flashlight';
-import { createPlayer, updatePlayer, type PlayerState } from './game/player';
+import { createGameState, createRuntime, stepGame, type Intent, type Runtime } from './game/simulation';
+import type { GameState } from './game/state';
 import { buildCityView, type CityView } from './render/cityRenderer';
 import { GameCamera } from './render/gameCamera';
 import { NightLighting } from './render/lighting';
 import { PlayerView } from './render/playerView';
+import { ZombieView } from './render/zombieView';
 import { generateCity, type City } from './world/city';
 
 // --- Render ---------------------------------------------------------------------------------
@@ -29,9 +31,6 @@ scene.background = new THREE.Color(0x05060a);
 const lighting = new NightLighting(scene);
 
 const gameCamera = new GameCamera();
-
-// Solo en desarrollo: acceso desde la consola del navegador para depurar y medir rendimiento.
-if (import.meta.env.DEV) Object.assign(window, { __game: { renderer, scene, lighting } });
 
 // Cámara de revisión (modo V): ortográfica con controles de órbita.
 const REVIEW_VIEW_SIZE = 160;
@@ -63,15 +62,32 @@ const hud = document.getElementById('hud')!;
 
 let city: City;
 let cityView: CityView | undefined;
-let player: PlayerState;
-/** Estado del jugador en el paso lógico anterior, para interpolar al dibujar (ver el bucle). */
-let previous: PlayerState;
+let state: GameState;
+let runtime: Runtime;
+/** Posición y orientación del jugador en el paso anterior, para interpolar al dibujar. */
+const previous = { x: 0, y: 0, facing: 0 };
 const aim = { x: 0, y: 0 };
-let flashlight = createFlashlight();
-/** Segundos de partida (solo avanza en el paso lógico). */
-let gameTime = 0;
 const playerView = new PlayerView();
 scene.add(playerView.root);
+const zombieView = new ZombieView();
+scene.add(zombieView.root);
+
+// Solo en desarrollo: acceso desde la consola del navegador para depurar y medir rendimiento.
+if (import.meta.env.DEV) {
+  Object.assign(window, {
+    __game: {
+      renderer,
+      scene,
+      lighting,
+      get state() {
+        return state;
+      },
+      get runtime() {
+        return runtime;
+      },
+    },
+  });
+}
 
 function loadCity(seedText: string): void {
   const graphVisible = cityView?.graphOverlay.visible ?? false;
@@ -85,19 +101,25 @@ function loadCity(seedText: string): void {
   cityView.graphOverlay.visible = graphVisible;
   scene.add(cityView.root);
 
-  player = createPlayer(city.spawn.x, city.spawn.y);
-  previous = { ...player };
-  flashlight = createFlashlight();
-  gameTime = 0;
-  aim.x = player.x + 1;
-  aim.y = player.y;
-  gameCamera.snapTo(player.x, player.y);
-
+  startGame();
   resetReviewCamera();
 
   const url = new URL(window.location.href);
   url.searchParams.set('seed', seedText);
   window.history.replaceState(null, '', url);
+}
+
+/** Empieza (o reinicia) la partida en la ciudad actual. */
+function startGame(): void {
+  state = createGameState(city);
+  runtime = createRuntime(city);
+  previous.x = state.player.x;
+  previous.y = state.player.y;
+  previous.facing = state.player.facing;
+  aim.x = state.player.x + 1;
+  aim.y = state.player.y;
+  input.clearPressed();
+  gameCamera.snapTo(state.player.x, state.player.y);
 }
 
 function resetReviewCamera(): void {
@@ -124,15 +146,8 @@ function setMode(next: Mode): void {
 
 // --- Lógica (paso fijo) ---------------------------------------------------------------------
 
-/**
- * Un paso de lógica. Siempre recibe el mismo dt (1/60 s).
- * Convierte la entrada de pantalla en una intención en coordenadas del mundo y actualiza al jugador.
- */
-function step(dt: number): void {
-  previous = { ...player };
-  gameTime += dt;
-  updateFlashlight(flashlight, dt);
-
+/** Traduce teclado y mouse a una intención en coordenadas del mundo. */
+function readIntent(): Intent {
   const move = input.screenMove();
   const axes = gameCamera.screenAxesOnGround();
   const mouseOnGround = gameCamera.groundPointUnderMouse(input.mouse.x, input.mouse.y);
@@ -140,19 +155,21 @@ function step(dt: number): void {
     aim.x = mouseOnGround.x;
     aim.y = mouseOnGround.y;
   }
+  return {
+    // La dirección de pantalla (derecha/arriba) se proyecta sobre los ejes del suelo.
+    moveX: move.x * axes.rightX + move.y * axes.upX,
+    moveY: move.x * axes.rightY + move.y * axes.upY,
+    aimX: aim.x,
+    aimY: aim.y,
+    toggleFlashlight: input.consume('KeyF'),
+  };
+}
 
-  updatePlayer(
-    player,
-    {
-      // La dirección de pantalla (derecha/arriba) se proyecta sobre los ejes del suelo.
-      moveX: move.x * axes.rightX + move.y * axes.upX,
-      moveY: move.x * axes.rightY + move.y * axes.upY,
-      aimX: aim.x,
-      aimY: aim.y,
-    },
-    city.grid,
-    dt,
-  );
+function step(dt: number): void {
+  previous.x = state.player.x;
+  previous.y = state.player.y;
+  previous.facing = state.player.facing;
+  stepGame(state, runtime, readIntent(), dt);
 }
 
 // --- Bucle principal ------------------------------------------------------------------------
@@ -174,6 +191,7 @@ let lastTime = performance.now();
 let fpsFrames = 0;
 let fpsTime = 0;
 let fps = 0;
+let stepMs = 0;
 
 function frame(now: number): void {
   // Si la pestaña estuvo en segundo plano, no queremos simular 10 segundos de golpe.
@@ -190,20 +208,27 @@ function frame(now: number): void {
 
   if (mode === 'play') {
     accumulator += frameDt;
+    const t0 = performance.now();
     while (accumulator >= STEP) {
       step(STEP);
       accumulator -= STEP;
     }
+    stepMs = stepMs * 0.95 + (performance.now() - t0) * 0.05;
     const alpha = accumulator / STEP;
-    const x = previous.x + (player.x - previous.x) * alpha;
-    const y = previous.y + (player.y - previous.y) * alpha;
-    playerView.update(x, y, lerpAngle(previous.facing, player.facing, alpha));
+    const p = state.player;
+    const x = previous.x + (p.x - previous.x) * alpha;
+    const y = previous.y + (p.y - previous.y) * alpha;
+    const facing = lerpAngle(previous.facing, p.facing, alpha);
+    playerView.update(x, y, facing);
+    zombieView.update(state, city.grid, x, y, alpha);
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
-    lighting.update(x, y, lerpAngle(previous.facing, player.facing, alpha), flashlightPower(flashlight, gameTime), frameDt);
+    lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
+    state.events.length = 0;
     renderer.render(scene, gameCamera.camera);
   } else {
-    playerView.update(player.x, player.y, player.facing);
+    playerView.update(state.player.x, state.player.y, state.player.facing);
+    zombieView.update(state, city.grid, state.player.x, state.player.y, 1);
     cityView?.updateOcclusion();
     reviewControls.update();
     renderer.render(scene, reviewCamera);
@@ -231,10 +256,13 @@ function updateHud(): void {
   const seed = `seed: <b>${escapeHtml(city.seedText)}</b>  (huella ${city.fingerprint})`;
   let text: string;
   if (mode === 'play') {
+    const light = state.flashlight;
     text =
-      `<b>ZOMBIE CITY</b> · hito 3: oscuridad · ${fps} FPS\n${seed}\n` +
-      `linterna: ${flashlight.on ? 'encendida' : 'apagada'} · batería ${Math.ceil(flashlight.charge)}%\n\n` +
-      `[WASD] moverse  [mouse] apuntar  [F] linterna\n[V] vista de revisión  [N] nueva seed  [G] grafo`;
+      `<b>ZOMBIE CITY</b> · hito 4: zombies · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
+      `vida ${Math.ceil(state.player.hp)} · zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s\n` +
+      `linterna: ${light.on ? 'encendida' : 'apagada'} · batería ${Math.ceil(light.charge)}%` +
+      (state.status === 'lost' ? `\n\n<b>TE ALCANZARON</b> · [Enter] reintentar` : '') +
+      `\n\n[WASD] moverse  [mouse] apuntar  [F] linterna\n[V] vista de revisión  [N] nueva seed  [G] grafo`;
   } else {
     const exits = city.layout.exits
       .map((e) => `  ${e.kind === 'helicopter' ? 'helicóptero (plaza)' : 'carretera'}: ${e.distance} tramos`)
@@ -268,8 +296,8 @@ window.addEventListener('keydown', (event) => {
     case 'KeyR':
       if (mode === 'review') resetReviewCamera();
       break;
-    case 'KeyF':
-      flashlight.on = !flashlight.on;
+    case 'Enter':
+      if (state.status !== 'playing') startGame();
       break;
   }
 });

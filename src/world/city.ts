@@ -5,6 +5,7 @@
 // irá en otra estructura serializable, como pide el CLAUDE.md.
 
 import { generateLayout, type CityLayout } from './cityLayout';
+import { planEncounters, type EncounterPlan } from './encounters';
 import { hashString, Rng } from './rng';
 import { buildTileGrid, nodeCenter, type TileGrid } from './tileGrid';
 
@@ -16,6 +17,8 @@ export interface City {
   grid: TileGrid;
   /** Posición inicial del jugador, en tiles. */
   spawn: { x: number; y: number };
+  /** Dónde empiezan los zombies (el plan; los zombies vivos son estado dinámico). */
+  encounters: EncounterPlan;
   /** Huella de la ciudad generada, para comprobar a simple vista que la generación es determinista. */
   fingerprint: string;
 }
@@ -38,7 +41,9 @@ export function generateCity(seedText: string): City {
   const { graph, startNode } = layout;
   const spawn = { x: nodeCenter(graph.nodeX(startNode)), y: nodeCenter(graph.nodeY(startNode)) };
 
-  return { seedText, seed, layout, grid, spawn, fingerprint: fingerprintOf(grid) };
+  const encounters = planEncounters(grid, layout, spawn, rng.fork('encounters'));
+
+  return { seedText, seed, layout, grid, spawn, encounters, fingerprint: fingerprintOf(grid) };
 }
 
 /** Hash FNV-1a de los tiles y las alturas de los edificios. */

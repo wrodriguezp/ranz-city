@@ -4,14 +4,34 @@
 
 export class Input {
   private readonly down = new Set<string>();
+  /**
+   * Teclas presionadas que la lógica todavía no "consumió". Hace falta porque la lógica corre a
+   * paso fijo: en un cuadro puede haber 0, 1 o 2 pasos. Si solo miráramos isDown, un toque muy
+   * rápido (apretar y soltar entre dos pasos) se perdería.
+   */
+  private readonly pressed = new Set<string>();
   /** Posición del mouse en coordenadas normalizadas de pantalla (NDC): de -1 a 1 en cada eje. */
   readonly mouse = { x: 0, y: 0 };
 
   constructor(target: HTMLElement) {
-    window.addEventListener('keydown', (e) => this.down.add(e.code));
+    window.addEventListener('keydown', (e) => {
+      if (!e.repeat) this.pressed.add(e.code);
+      this.down.add(e.code);
+    });
     window.addEventListener('keyup', (e) => this.down.delete(e.code));
+    // Los botones del mouse se tratan como teclas: "Mouse0" (izquierdo) y "Mouse2" (derecho).
+    target.addEventListener('pointerdown', (e) => {
+      this.pressed.add(`Mouse${e.button}`);
+      this.down.add(`Mouse${e.button}`);
+    });
+    window.addEventListener('pointerup', (e) => this.down.delete(`Mouse${e.button}`));
+    // Sin esto, el clic derecho abriría el menú del navegador.
+    target.addEventListener('contextmenu', (e) => e.preventDefault());
     // Si la ventana pierde el foco con una tecla apretada, nunca llega el keyup: soltamos todo.
-    window.addEventListener('blur', () => this.down.clear());
+    window.addEventListener('blur', () => {
+      this.down.clear();
+      this.pressed.clear();
+    });
     target.addEventListener('pointermove', (e) => {
       const rect = target.getBoundingClientRect();
       this.mouse.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
@@ -21,6 +41,16 @@ export class Input {
 
   isDown(code: string): boolean {
     return this.down.has(code);
+  }
+
+  /** ¿Se presionó desde la última vez que se preguntó? (y la "consume"). */
+  consume(code: string): boolean {
+    return this.pressed.delete(code);
+  }
+
+  /** Descarta las pulsaciones pendientes (al pausar o reiniciar). */
+  clearPressed(): void {
+    this.pressed.clear();
   }
 
   /**

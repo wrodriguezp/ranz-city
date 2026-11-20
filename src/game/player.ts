@@ -7,12 +7,19 @@ import { moveCircle } from './collision';
 /** Tiles por segundo. Una calle (4 tiles) se cruza en menos de un segundo. */
 export const PLAYER_SPEED = 5.5;
 export const PLAYER_RADIUS = 0.4;
+export const PLAYER_MAX_HP = 100;
 
 export interface PlayerState {
   x: number;
   y: number;
   /** Ángulo hacia donde mira, en radianes, en el plano del mundo (0 = +x). */
   facing: number;
+  hp: number;
+  /** Empujón recibido (p. ej. la embestida del tanque), en tiles/s; se disipa solo. */
+  knockX: number;
+  knockY: number;
+  /** Segundos desde el último daño (para el efecto rojo de la pantalla). */
+  hurtTimer: number;
 }
 
 export interface PlayerIntent {
@@ -25,7 +32,7 @@ export interface PlayerIntent {
 }
 
 export function createPlayer(x: number, y: number): PlayerState {
-  return { x, y, facing: 0 };
+  return { x, y, facing: 0, hp: PLAYER_MAX_HP, knockX: 0, knockY: 0, hurtTimer: 99 };
 }
 
 export function updatePlayer(player: PlayerState, intent: PlayerIntent, grid: TileGrid, dt: number): void {
@@ -34,9 +41,14 @@ export function updatePlayer(player: PlayerState, intent: PlayerIntent, grid: Ti
     player.x,
     player.y,
     PLAYER_RADIUS,
-    intent.moveX * PLAYER_SPEED * dt,
-    intent.moveY * PLAYER_SPEED * dt,
+    (intent.moveX * PLAYER_SPEED + player.knockX) * dt,
+    (intent.moveY * PLAYER_SPEED + player.knockY) * dt,
   );
+  // El empujón decae exponencialmente: ~90% menos en un cuarto de segundo.
+  const decay = Math.exp(-9 * dt);
+  player.knockX *= decay;
+  player.knockY *= decay;
+  player.hurtTimer += dt;
   player.x = moved.x;
   player.y = moved.y;
 
