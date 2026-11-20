@@ -50,6 +50,11 @@ El objetivo es validar si la idea **es divertida**, no construir el juego final.
    con la posición del jugador y las salidas.
 8. **Escape**: helicóptero en una plaza y otras salidas. Pantallas de victoria y derrota, con la seed visible
    para poder repetir una partida.
+   **Reloj de evacuación**: la partida tiene una hora en el juego y cada salida tiene una hora límite.
+   Mientras más cerca está la salida, antes se va. Si llegas tarde, esa salida ya no sirve. La más lejana
+   espera al jugador sin límite, así que siempre queda una opción. Esto también resuelve que el camino a una
+   salida pase por otra: pasar por la cercana fuera de hora no te saca. Los tiempos tienen que ser holgados:
+   el reloj es para presionar, no para impedir pelear con los zombies.
 
 ## Decisiones técnicas que hay que respetar
 - **El mundo es 2D por dentro y 3D solo al dibujarse.** La ciudad se guarda como una grilla de tiles
