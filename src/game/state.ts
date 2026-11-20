@@ -5,6 +5,7 @@
 // Así se puede serializar con JSON: guardar la partida, o en el futuro multijugador, que el host
 // mande este estado a los demás jugadores.
 
+import type { WeaponState } from './combat';
 import type { FlashlightState } from './flashlight';
 import type { PlayerState } from './player';
 
@@ -73,6 +74,12 @@ export type GameEvent =
   | { type: 'hurt'; damage: number }
   | { type: 'message'; text: string; tone?: 'info' | 'danger' | 'good' };
 
+export interface Inventory {
+  medkits: number;
+  /** Baterías de repuesto para la linterna. */
+  batteries: number;
+}
+
 export interface GameStats {
   kills: number;
   shots: number;
@@ -89,6 +96,8 @@ export interface GameState {
   rng: number;
   player: PlayerState;
   flashlight: FlashlightState;
+  weapon: WeaponState;
+  inventory: Inventory;
   zombies: Zombie[];
   nextZombieId: number;
   corpses: Corpse[];

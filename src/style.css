@@ -20,3 +20,43 @@ canvas { display: block; }
   white-space: pre;
 }
 #hud b { color: #ffb347; }
+
+/* --- HUD de juego --------------------------------------------------------------------------- */
+canvas { cursor: crosshair; }
+#hud { font-size: 11px; opacity: 0.8; }
+#game-hud { position: fixed; inset: 0; pointer-events: none; color: #e6e6e6; }
+#game-hud .vignette {
+  position: absolute; inset: 0; opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(170, 0, 0, 0.75) 100%);
+}
+#game-hud .panel {
+  position: absolute; background: rgba(0, 0, 0, 0.6); border-radius: 6px; padding: 10px 14px; font-size: 13px;
+}
+#game-hud .status { left: 12px; bottom: 12px; min-width: 300px; }
+#game-hud .row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+#game-hud .label { width: 34px; color: #9aa; font-size: 11px; }
+#game-hud .num { width: 40px; text-align: right; }
+#game-hud .bar { flex: 1; height: 10px; background: rgba(255, 255, 255, 0.12); border-radius: 3px; overflow: hidden; }
+#game-hud .fill { height: 100%; width: 100%; background: #6fd36f; transition: width 0.15s; }
+#game-hud .fill.health.low { background: #e04545; }
+#game-hud .fill.battery { background: #f2d16b; }
+#game-hud .fill.battery.low { background: #c77d2b; }
+#game-hud .weapon { margin-top: 4px; }
+#game-hud .weapon b, #game-hud .items b { color: #ffb347; }
+#game-hud .items { margin-top: 4px; font-size: 12px; color: #bbb; }
+#game-hud .dim { color: #888; }
+#game-hud .messages {
+  position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+#game-hud .message {
+  background: rgba(0, 0, 0, 0.65); padding: 6px 14px; border-radius: 4px; font-size: 15px; white-space: nowrap;
+}
+#game-hud .message.danger { color: #ff7a6b; }
+#game-hud .message.good { color: #8fe08f; }
+#game-hud .prompt {
+  position: absolute; bottom: 22%; left: 50%; transform: translateX(-50%); display: none;
+  background: rgba(0, 0, 0, 0.7); padding: 8px 16px; border-radius: 4px; font-size: 14px; text-align: center;
+}
+#game-hud .prompt .bar { margin-top: 6px; height: 6px; }
+#game-hud .prompt .fill { background: #ffb347; transition: none; }

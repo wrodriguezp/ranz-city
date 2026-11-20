@@ -33,7 +33,7 @@ const STATS: Record<
   ZombieKind,
   { hp: number; radius: number; minSpeed: number; maxSpeed: number; damage: number; cooldown: number; reach: number }
 > = {
-  walker: { hp: 100, radius: 0.35, minSpeed: 2.6, maxSpeed: 3.9, damage: 9, cooldown: 1.1, reach: 0.45 },
+  walker: { hp: 100, radius: 0.35, minSpeed: 2.6, maxSpeed: 3.9, damage: 7, cooldown: 1.1, reach: 0.45 },
   tank: { hp: 1100, radius: 0.8, minSpeed: 2.1, maxSpeed: 2.1, damage: 30, cooldown: 1.6, reach: 0.55 },
 };
 
@@ -58,7 +58,7 @@ const CHARGE_STUN = 1.6;
 export const MAX_ZOMBIES = 450;
 const HORDE_FIRST = 90;
 const HORDE_INTERVAL = 100;
-const HORDE_HEAT_LIMIT = 10;
+const HORDE_HEAT_LIMIT = 18;
 const HORDE_CHASE_TIME = 75;
 
 export function createZombie(state: GameState, x: number, y: number, kind: ZombieKind): Zombie {
@@ -454,7 +454,7 @@ function turnToward(current: number, target: number, maxStep: number): number {
  */
 export function updateHordes(state: GameState, rt: ZombieRuntime, dt: number, danger: number): void {
   state.hordeTimer -= dt;
-  state.noiseHeat = Math.max(0, state.noiseHeat - 0.12 * dt);
+  state.noiseHeat = Math.max(0, state.noiseHeat - 0.25 * dt);
 
   const byNoise = state.noiseHeat >= HORDE_HEAT_LIMIT;
   if (state.hordeTimer > 0 && !byNoise) return;

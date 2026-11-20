@@ -11,10 +11,12 @@ import { Input } from './game/input';
 import { createGameState, createRuntime, stepGame, type Intent, type Runtime } from './game/simulation';
 import type { GameState } from './game/state';
 import { buildCityView, type CityView } from './render/cityRenderer';
+import { EffectsView } from './render/effectsView';
 import { GameCamera } from './render/gameCamera';
 import { NightLighting } from './render/lighting';
 import { PlayerView } from './render/playerView';
 import { ZombieView } from './render/zombieView';
+import { Hud } from './ui/hud';
 import { generateCity, type City } from './world/city';
 
 // --- Render ---------------------------------------------------------------------------------
@@ -71,6 +73,9 @@ const playerView = new PlayerView();
 scene.add(playerView.root);
 const zombieView = new ZombieView();
 scene.add(zombieView.root);
+const effects = new EffectsView(lighting);
+scene.add(effects.root);
+const gameHud = new Hud();
 
 // Solo en desarrollo: acceso desde la consola del navegador para depurar y medir rendimiento.
 if (import.meta.env.DEV) {
@@ -119,6 +124,8 @@ function startGame(): void {
   aim.x = state.player.x + 1;
   aim.y = state.player.y;
   input.clearPressed();
+  effects.reset();
+  gameHud.clearMessages();
   gameCamera.snapTo(state.player.x, state.player.y);
 }
 
@@ -140,6 +147,7 @@ function randomSeed(): string {
 
 function setMode(next: Mode): void {
   mode = next;
+  gameHud.setVisible(mode === 'play');
   reviewControls.enabled = mode === 'review';
   lighting.setDaylight(mode === 'review');
 }
@@ -162,6 +170,18 @@ function readIntent(): Intent {
     aimX: aim.x,
     aimY: aim.y,
     toggleFlashlight: input.consume('KeyF'),
+    changeBattery: input.consume('KeyB'),
+    useMedkit: input.consume('KeyH'),
+    attack: input.consume('Mouse0'),
+    melee: input.consume('Mouse2') || input.consume('Space'),
+    reload: input.consume('KeyR'),
+    select: input.consume('KeyQ')
+      ? 'swap'
+      : input.consume('Digit1')
+        ? 'melee'
+        : input.consume('Digit2')
+          ? 'pistol'
+          : undefined,
   };
 }
 
@@ -224,7 +244,12 @@ function frame(now: number): void {
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
+    // Los eventos de los pasos de este cuadro: efectos y mensajes, y después se descartan.
+    effects.handle(state.events, city.seed % 1000);
+    gameHud.handle(state.events, now / 1000);
     state.events.length = 0;
+    effects.update(frameDt);
+    gameHud.update(state, now / 1000);
     renderer.render(scene, gameCamera.camera);
   } else {
     playerView.update(state.player.x, state.player.y, state.player.facing);
@@ -258,11 +283,13 @@ function updateHud(): void {
   if (mode === 'play') {
     const light = state.flashlight;
     text =
-      `<b>ZOMBIE CITY</b> · hito 4: zombies · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
-      `vida ${Math.ceil(state.player.hp)} · zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s\n` +
-      `linterna: ${light.on ? 'encendida' : 'apagada'} · batería ${Math.ceil(light.charge)}%` +
+      `<b>ZOMBIE CITY</b> · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
+      `zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s · ruido ${state.noiseHeat.toFixed(1)}\n` +
+      `linterna ${light.on ? 'encendida' : 'apagada'}` +
       (state.status === 'lost' ? `\n\n<b>TE ALCANZARON</b> · [Enter] reintentar` : '') +
-      `\n\n[WASD] moverse  [mouse] apuntar  [F] linterna\n[V] vista de revisión  [N] nueva seed  [G] grafo`;
+      `\n\n[WASD] moverse  [mouse] apuntar  [clic] atacar  [clic der./espacio] golpe\n` +
+      `[Q] cambiar arma  [R] recargar  [F] linterna  [B] batería  [H] botiquín\n` +
+      `[V] vista de revisión  [N] nueva seed  [G] grafo`;
   } else {
     const exits = city.layout.exits
       .map((e) => `  ${e.kind === 'helicopter' ? 'helicóptero (plaza)' : 'carretera'}: ${e.distance} tramos`)

@@ -5,9 +5,10 @@
 // y después el render lee el estado. Nada de aquí importa Three.js.
 
 import type { City } from '../world/city';
+import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { createFlashlight, updateFlashlight } from './flashlight';
 import { FlowField } from './flowField';
-import { createPlayer, updatePlayer } from './player';
+import { createPlayer, PLAYER_MAX_HP, updatePlayer } from './player';
 import { SpatialHash } from './spatialHash';
 import type { GameState } from './state';
 import { createZombie, initialHordeTimer, updateHordes, updateZombies, type ZombieRuntime } from './zombies';
@@ -16,13 +17,17 @@ import { createZombie, initialHordeTimer, updateHordes, updateZombies, type Zomb
 export type Runtime = ZombieRuntime;
 
 /** Lo que el jugador quiere hacer en este paso, ya en coordenadas del mundo. */
-export interface Intent {
+export interface Intent extends CombatIntent {
   moveX: number;
   moveY: number;
   aimX: number;
   aimY: number;
   toggleFlashlight: boolean;
+  changeBattery: boolean;
+  useMedkit: boolean;
 }
+
+const MEDKIT_HEAL = 60;
 
 export function createRuntime(city: City): Runtime {
   return {
@@ -41,6 +46,8 @@ export function createGameState(city: City): GameState {
     rng: (city.seed ^ 0x9e3779b9) >>> 0,
     player: createPlayer(city.spawn.x, city.spawn.y),
     flashlight: createFlashlight(),
+    weapon: createWeapons(),
+    inventory: { medkits: 1, batteries: 1 },
     zombies: [],
     nextZombieId: 0,
     corpses: [],
@@ -60,15 +67,46 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
 
   updatePlayer(state.player, intent, rt.city.grid, dt);
 
-  if (intent.toggleFlashlight) state.flashlight.on = !state.flashlight.on;
+  updateItems(state, intent);
   updateFlashlight(state.flashlight, dt);
+
+  // El combate va antes que los zombies: lo que muere en este paso ya no ataca.
+  updateCombat(state, rt, intent, dt);
 
   rt.field.update(state.player.x, state.player.y);
   updateZombies(state, rt, dt);
   updateHordes(state, rt, dt, 0.4);
 
-  if (state.player.hp <= 0) {
+  if (state.player.hp <= 0 && state.status === 'playing') {
     state.status = 'lost';
     state.events.push({ type: 'message', text: 'Te alcanzaron.', tone: 'danger' });
+  }
+}
+
+/** Linterna, baterías y botiquines. */
+function updateItems(state: GameState, intent: Intent): void {
+  const { flashlight, inventory, player } = state;
+  if (intent.toggleFlashlight) state.flashlight.on = !state.flashlight.on;
+
+  // Cambiar la batería: a mano con B, o sola cuando la puesta se agota y hay repuesto.
+  const empty = flashlight.charge <= 0 && flashlight.on;
+  if ((intent.changeBattery || empty) && inventory.batteries > 0 && flashlight.charge < 95) {
+    inventory.batteries--;
+    flashlight.charge = 100;
+    state.events.push({ type: 'message', text: 'Batería nueva en la linterna', tone: 'good' });
+  } else if (intent.changeBattery && inventory.batteries === 0) {
+    state.events.push({ type: 'message', text: 'No tienes baterías de repuesto' });
+  }
+
+  if (intent.useMedkit) {
+    if (inventory.medkits === 0) {
+      state.events.push({ type: 'message', text: 'No tienes botiquines' });
+    } else if (player.hp >= PLAYER_MAX_HP) {
+      state.events.push({ type: 'message', text: 'Tu vida ya está completa' });
+    } else {
+      inventory.medkits--;
+      player.hp = Math.min(PLAYER_MAX_HP, player.hp + MEDKIT_HEAL);
+      state.events.push({ type: 'message', text: `+${MEDKIT_HEAL} de vida`, tone: 'good' });
+    }
   }
 }
