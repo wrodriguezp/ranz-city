@@ -34,8 +34,15 @@ export interface CityView {
   root: THREE.Group;
   /** Capa de depuración con el grafo (cruces coloreados por distancia y tramos abiertos). */
   graphOverlay: THREE.Group;
+  /**
+   * Vuelve semitransparentes los edificios que tapan al jugador.
+   * toCamera: dirección (normalizada) desde la escena hacia la cámara. Sin argumentos, no oculta ninguno.
+   */
+  updateOcclusion(playerX?: number, playerY?: number, toCamera?: THREE.Vector3): void;
   dispose(): void;
 }
+
+const BUILDING_INSET = 0.12;
 
 export function buildCityView(city: City): CityView {
   const root = new THREE.Group();
@@ -69,11 +76,13 @@ export function buildCityView(city: City): CityView {
     grid.buildings,
     (b) => b.floors * FLOOR_HEIGHT,
     () => colorRng.pick(BUILDING_PALETTE),
-    0.12,
+    BUILDING_INSET,
   );
   buildings.castShadow = true;
   buildings.receiveShadow = true;
   root.add(buildings);
+  const occlusion = createBuildingOcclusion(city, buildings, unitBox);
+  root.add(occlusion.ghosts);
 
   // Barricadas.
   const barricades = instancedBoxes(unitBox, grid.barricades, () => BARRICADE_HEIGHT, () => COLORS.barricade, 0.05);
@@ -121,6 +130,7 @@ export function buildCityView(city: City): CityView {
   return {
     root,
     graphOverlay,
+    updateOcclusion: occlusion.update,
     dispose() {
       // Three.js no libera memoria de la GPU solo: hay que liberar geometrías y materiales a mano.
       root.traverse((obj) => {
@@ -132,6 +142,95 @@ export function buildCityView(city: City): CityView {
       });
     },
   };
+}
+
+/**
+ * Desvanecido de edificios que tapan al jugador.
+ *
+ * Con cámara ortográfica, todos los rayos de visión son paralelos. Entonces, para saber si un
+ * edificio tapa al jugador basta con lanzar un rayo DESDE el jugador HACIA la cámara: si choca
+ * con la caja del edificio, ese edificio está entre los dos. Lanzamos varios rayos (pies, cabeza
+ * y a los costados) para desvanecer también cuando el personaje está tapado a medias.
+ *
+ * Los InstancedMesh comparten un solo material, así que no podemos bajar la opacidad de una sola
+ * copia. El truco: "esconder" esa copia en la malla normal (escala 0) y dibujarla en una segunda
+ * malla de fantasmas con material transparente. Solo tocamos la GPU cuando cambia el conjunto.
+ */
+function createBuildingOcclusion(city: City, buildings: THREE.InstancedMesh, geometry: THREE.BufferGeometry) {
+  const list = city.grid.buildings;
+  const original = list.map((_, i) => {
+    const m = new THREE.Matrix4();
+    buildings.getMatrixAt(i, m);
+    return m;
+  });
+  const boxes = list.map(
+    (b) =>
+      new THREE.Box3(
+        new THREE.Vector3(b.x + BUILDING_INSET, 0, b.y + BUILDING_INSET),
+        new THREE.Vector3(b.x + b.w - BUILDING_INSET, b.floors * FLOOR_HEIGHT, b.y + b.h - BUILDING_INSET),
+      ),
+  );
+
+  const ghosts = new THREE.InstancedMesh(
+    geometry,
+    new THREE.MeshStandardMaterial({ roughness: 0.85, transparent: true, opacity: 0.2, depthWrite: false }),
+    Math.max(1, list.length),
+  );
+  ghosts.count = 0;
+  // Los fantasmas siguen proyectando su sombra, así la sombra no "parpadea" al desvanecerse.
+  ghosts.castShadow = true;
+
+  const hiddenMatrix = new THREE.Matrix4().makeScale(0, 0, 0);
+  const ray = new THREE.Ray();
+  const side = new THREE.Vector3();
+  const color = new THREE.Color();
+  let hiddenKey = '';
+
+  function apply(hidden: number[]): void {
+    const key = hidden.join(',');
+    if (key === hiddenKey) return;
+    hiddenKey = key;
+
+    const hiddenSet = new Set(hidden);
+    for (let i = 0; i < list.length; i++) buildings.setMatrixAt(i, hiddenSet.has(i) ? hiddenMatrix : original[i]);
+    hidden.forEach((buildingIndex, k) => {
+      ghosts.setMatrixAt(k, original[buildingIndex]);
+      buildings.getColorAt(buildingIndex, color);
+      ghosts.setColorAt(k, color);
+    });
+    ghosts.count = hidden.length;
+    buildings.instanceMatrix.needsUpdate = true;
+    ghosts.instanceMatrix.needsUpdate = true;
+    if (ghosts.instanceColor) ghosts.instanceColor.needsUpdate = true;
+  }
+
+  function update(playerX?: number, playerY?: number, toCamera?: THREE.Vector3): void {
+    if (playerX === undefined || playerY === undefined || !toCamera) {
+      apply([]);
+      return;
+    }
+    // "side" es la dirección horizontal de la pantalla, para los rayos de los costados.
+    side.set(toCamera.z, 0, -toCamera.x).normalize();
+    const hidden: number[] = [];
+    for (let i = 0; i < boxes.length; i++) {
+      let blocks = false;
+      for (const offset of [-0.7, 0, 0.7]) {
+        for (const height of [0.2, 1.6]) {
+          ray.origin.set(playerX + side.x * offset, height, playerY + side.z * offset);
+          ray.direction.copy(toCamera);
+          if (ray.intersectsBox(boxes[i])) {
+            blocks = true;
+            break;
+          }
+        }
+        if (blocks) break;
+      }
+      if (blocks) hidden.push(i);
+    }
+    apply(hidden);
+  }
+
+  return { ghosts, update };
 }
 
 /** Crea un InstancedMesh con una caja por rectángulo. */
