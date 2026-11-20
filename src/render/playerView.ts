@@ -16,7 +16,8 @@ export class PlayerView {
       new THREE.MeshStandardMaterial({ color: 0x4fa3ff, roughness: 0.6 }),
     );
     body.position.y = BODY_HEIGHT / 2;
-    body.castShadow = true;
+    // El jugador no proyecta sombra: la linterna sale de su pecho y su propia sombra la taparía.
+    body.castShadow = false;
 
     // La nariz apunta hacia +x local; al rotar el grupo, apunta hacia donde mira el jugador.
     const nose = new THREE.Mesh(
@@ -24,7 +25,7 @@ export class PlayerView {
       new THREE.MeshStandardMaterial({ color: 0xffffff, roughness: 0.5 }),
     );
     nose.position.set(PLAYER_RADIUS + 0.1, BODY_HEIGHT * 0.7, 0);
-    nose.castShadow = true;
+    
 
     this.root.add(body, nose);
   }

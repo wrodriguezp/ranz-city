@@ -7,9 +7,11 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { Input } from './game/input';
+import { createFlashlight, flashlightPower, updateFlashlight } from './game/flashlight';
 import { createPlayer, updatePlayer, type PlayerState } from './game/player';
 import { buildCityView, type CityView } from './render/cityRenderer';
 import { GameCamera } from './render/gameCamera';
+import { NightLighting } from './render/lighting';
 import { PlayerView } from './render/playerView';
 import { generateCity, type City } from './world/city';
 
@@ -23,20 +25,13 @@ renderer.shadowMap.type = THREE.PCFSoftShadowMap;
 document.body.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-scene.background = new THREE.Color(0x0b0d10);
-
-// Luz de día para probar. La noche y la linterna llegan en el hito 3.
-scene.add(new THREE.HemisphereLight(0xdfe8ff, 0x30302a, 1.2));
-const sun = new THREE.DirectionalLight(0xffffff, 1.6);
-sun.castShadow = true;
-sun.shadow.mapSize.set(4096, 4096);
-sun.shadow.bias = -0.0005;
-scene.add(sun, sun.target);
+scene.background = new THREE.Color(0x05060a);
+const lighting = new NightLighting(scene);
 
 const gameCamera = new GameCamera();
 
 // Solo en desarrollo: acceso desde la consola del navegador para depurar y medir rendimiento.
-if (import.meta.env.DEV) Object.assign(window, { __game: { renderer, scene, sun } });
+if (import.meta.env.DEV) Object.assign(window, { __game: { renderer, scene, lighting } });
 
 // Cámara de revisión (modo V): ortográfica con controles de órbita.
 const REVIEW_VIEW_SIZE = 160;
@@ -72,6 +67,9 @@ let player: PlayerState;
 /** Estado del jugador en el paso lógico anterior, para interpolar al dibujar (ver el bucle). */
 let previous: PlayerState;
 const aim = { x: 0, y: 0 };
+let flashlight = createFlashlight();
+/** Segundos de partida (solo avanza en el paso lógico). */
+let gameTime = 0;
 const playerView = new PlayerView();
 scene.add(playerView.root);
 
@@ -89,18 +87,11 @@ function loadCity(seedText: string): void {
 
   player = createPlayer(city.spawn.x, city.spawn.y);
   previous = { ...player };
+  flashlight = createFlashlight();
+  gameTime = 0;
   aim.x = player.x + 1;
   aim.y = player.y;
   gameCamera.snapTo(player.x, player.y);
-
-  // El sol y su sombra cubren toda la ciudad.
-  const { width, height } = city.grid;
-  const center = new THREE.Vector3(width / 2, 0, height / 2);
-  sun.position.set(center.x - 60, 120, center.z - 40);
-  sun.target.position.copy(center);
-  const half = Math.max(width, height) * 0.75;
-  Object.assign(sun.shadow.camera, { left: -half, right: half, top: half, bottom: -half, near: 1, far: 400 });
-  sun.shadow.camera.updateProjectionMatrix();
 
   resetReviewCamera();
 
@@ -128,6 +119,7 @@ function randomSeed(): string {
 function setMode(next: Mode): void {
   mode = next;
   reviewControls.enabled = mode === 'review';
+  lighting.setDaylight(mode === 'review');
 }
 
 // --- Lógica (paso fijo) ---------------------------------------------------------------------
@@ -138,6 +130,8 @@ function setMode(next: Mode): void {
  */
 function step(dt: number): void {
   previous = { ...player };
+  gameTime += dt;
+  updateFlashlight(flashlight, dt);
 
   const move = input.screenMove();
   const axes = gameCamera.screenAxesOnGround();
@@ -205,6 +199,7 @@ function frame(now: number): void {
     const y = previous.y + (player.y - previous.y) * alpha;
     playerView.update(x, y, lerpAngle(previous.facing, player.facing, alpha));
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
+    lighting.update(x, y, lerpAngle(previous.facing, player.facing, alpha), flashlightPower(flashlight, gameTime), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
     renderer.render(scene, gameCamera.camera);
   } else {
@@ -237,9 +232,9 @@ function updateHud(): void {
   let text: string;
   if (mode === 'play') {
     text =
-      `<b>ZOMBIE CITY</b> · hito 2: jugador · ${fps} FPS\n${seed}\n` +
-      `posición: ${player.x.toFixed(1)}, ${player.y.toFixed(1)}\n\n` +
-      `[WASD] moverse  [mouse] apuntar\n[V] vista de revisión  [N] nueva seed  [G] grafo`;
+      `<b>ZOMBIE CITY</b> · hito 3: oscuridad · ${fps} FPS\n${seed}\n` +
+      `linterna: ${flashlight.on ? 'encendida' : 'apagada'} · batería ${Math.ceil(flashlight.charge)}%\n\n` +
+      `[WASD] moverse  [mouse] apuntar  [F] linterna\n[V] vista de revisión  [N] nueva seed  [G] grafo`;
   } else {
     const exits = city.layout.exits
       .map((e) => `  ${e.kind === 'helicopter' ? 'helicóptero (plaza)' : 'carretera'}: ${e.distance} tramos`)
@@ -273,6 +268,9 @@ window.addEventListener('keydown', (event) => {
     case 'KeyR':
       if (mode === 'review') resetReviewCamera();
       break;
+    case 'KeyF':
+      flashlight.on = !flashlight.on;
+      break;
   }
 });
 
@@ -282,6 +280,7 @@ window.addEventListener('resize', () => {
 });
 
 resizeCameras();
+setMode('play');
 loadCity(new URLSearchParams(window.location.search).get('seed') || randomSeed());
 // El bucle arranca recién cuando la ciudad cargó bien: si loadCity falla, vemos un solo error
 // en vez de uno por cuadro (60 por segundo) sobre un estado incompleto.

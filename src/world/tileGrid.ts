@@ -29,6 +29,10 @@ export const Tile = {
   Building: 2,
   Barricade: 3,
   Plaza: 4,
+  /** Auto estacionado: sólido, bloquea balas pero no la vista (es bajo). Se puede revisar. */
+  Car: 5,
+  /** Caja de suministros: igual que el auto, pero de un solo tile. */
+  Crate: 6,
 } as const;
 export type Tile = (typeof Tile)[keyof typeof Tile];
 
