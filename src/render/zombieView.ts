@@ -9,10 +9,13 @@
 // techos lo que hay en la calle de al lado; esto lo evita y mantiene el "no sé qué hay a la vuelta".
 // Dentro de lo visible, la iluminación hace el resto: en la oscuridad apenas se distinguen.
 //
-// Los zombies comunes se dibujan en TRES mallas instanciadas que comparten la matriz: cuerpo,
-// brazo izquierdo y brazo derecho. Así un brazo cortado es solo "no dibujar esa instancia" (una
-// matriz de escala cero), sin geometrías distintas por zombie. Sin piernas se dibuja tumbado
-// hacia adelante, arrastrándose. El tanque, que nunca pierde miembros, sigue en una sola malla.
+// Los zombies comunes se dibujan en CINCO mallas instanciadas: cuerpo (torso y cabeza), dos
+// brazos y dos piernas. Cada brazo y pierna es una "articulación": su matriz es la del cuerpo
+// multiplicada por un giro en el hombro o la cadera, y el ángulo sale de una fase de paso que
+// avanza según cuánto camina ese zombie. Así cientos de zombies caminan moviendo las piernas
+// y siguen siendo cinco llamadas de dibujo. Un brazo cortado es "no dibujar esa instancia" (una
+// matriz de escala cero). Sin piernas se dibuja tumbado hacia adelante, arrastrándose. El
+// tanque, que nunca pierde miembros, sigue en una sola malla.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
@@ -44,17 +47,43 @@ const DRAW_DISTANCE = 34;
 /** Hasta dónde se ve la silueta de un zombie tapado por un edificio. */
 const GHOST_DISTANCE = 20;
 
-function zombieParts(radius: number, height: number, armLength: number) {
-  const body = new THREE.CapsuleGeometry(radius, height - radius * 2, 4, 10);
-  body.translate(0, height / 2, 0);
-  // Brazos: dos cajas que salen hacia +x (el frente), a la altura de los hombros.
-  // En Three.js el lado izquierdo del zombie (mirando a +x) es -z.
-  const armL = new THREE.BoxGeometry(armLength, radius * 0.35, radius * 0.35);
-  armL.translate(radius * 0.5 + armLength / 2, height * 0.72, -radius * 0.55);
-  const armR = armL.clone();
-  armR.translate(0, 0, radius * 1.1);
-  const merged = mergeGeometries([body.toNonIndexed(), armL.toNonIndexed(), armR.toNonIndexed()]) ?? body;
-  return { body, armL, armR, merged };
+// --- Esqueleto del caminante (tiles; el frente es +x y su izquierda es -z) --------------------
+const HIP_Y = 0.66;
+const HIP_Z = 0.14;
+const SHOULDER_X = 0.12;
+const SHOULDER_Y = 1.28;
+const SHOULDER_Z = 0.27;
+const ARM_LENGTH = 0.58;
+/** Cuánto gira la pierna (radianes) en cada paso, y cuántos radianes de fase por tile caminado. */
+const STRIDE_SWING = 0.55;
+const PHASE_PER_TILE = 4.2;
+
+/**
+ * Las piezas del caminante. Brazos y piernas se arman con el pivote en el origen (hombro o
+ * cadera), así girarlos es solo multiplicar por una rotación antes de ubicarlos.
+ */
+function walkerParts() {
+  const torso = new THREE.CapsuleGeometry(0.3, 0.3, 4, 10);
+  torso.translate(0, 1.05, 0);
+  // La cabeza un poco adelantada: encorvado, como buscando.
+  const head = new THREE.SphereGeometry(0.19, 10, 8);
+  head.translate(0.08, 1.6, 0);
+  const body = mergeGeometries([torso.toNonIndexed(), head.toNonIndexed()]) ?? torso;
+  const arm = new THREE.BoxGeometry(ARM_LENGTH, 0.11, 0.11);
+  arm.translate(ARM_LENGTH / 2, 0, 0);
+  const leg = new THREE.BoxGeometry(0.17, HIP_Y, 0.17);
+  leg.translate(0, -HIP_Y / 2, 0);
+  // La silueta (para cuando un edificio lo tapa) va de una pieza, en pose quieta.
+  const posed = (g: THREE.BufferGeometry, x: number, y: number, z: number) => g.clone().translate(x, y, z).toNonIndexed();
+  const merged =
+    mergeGeometries([
+      body.clone(),
+      posed(arm, SHOULDER_X, SHOULDER_Y, -SHOULDER_Z),
+      posed(arm, SHOULDER_X, SHOULDER_Y, SHOULDER_Z),
+      posed(leg, 0, HIP_Y, -HIP_Z),
+      posed(leg, 0, HIP_Y, HIP_Z),
+    ]) ?? body;
+  return { body, arm, leg, merged };
 }
 
 /**
@@ -92,7 +121,15 @@ export class ZombieView {
   private readonly walkers: THREE.InstancedMesh;
   private readonly armsL: THREE.InstancedMesh;
   private readonly armsR: THREE.InstancedMesh;
+  private readonly legsL: THREE.InstancedMesh;
+  private readonly legsR: THREE.InstancedMesh;
   private readonly tanks: THREE.InstancedMesh;
+  /** Fase del paso de cada zombie (solo dibujo: no es estado del juego). */
+  private readonly gait = new Map<number, { phase: number; seen: number }>();
+  private readonly local = new THREE.Matrix4();
+  private readonly limb = new THREE.Matrix4();
+  private lastFrame = 0;
+  private frameDt = 0;
   private readonly corpses: THREE.InstancedMesh;
   /** Copias de los zombies que solo se dibujan donde algo los TAPA (ver constructor). */
   private readonly walkerGhosts: THREE.InstancedMesh;
@@ -112,12 +149,14 @@ export class ZombieView {
 
   constructor() {
     const material = new THREE.MeshStandardMaterial({ roughness: 0.9 });
-    const walker = zombieParts(0.33, 1.55, 0.55);
+    const walker = walkerParts();
     this.walkers = new THREE.InstancedMesh(walker.body, material, MAX_WALKERS);
-    this.armsL = new THREE.InstancedMesh(walker.armL, material, MAX_WALKERS);
-    this.armsR = new THREE.InstancedMesh(walker.armR, material, MAX_WALKERS);
+    this.armsL = new THREE.InstancedMesh(walker.arm, material, MAX_WALKERS);
+    this.armsR = new THREE.InstancedMesh(walker.arm, material, MAX_WALKERS);
+    this.legsL = new THREE.InstancedMesh(walker.leg, material, MAX_WALKERS);
+    this.legsR = new THREE.InstancedMesh(walker.leg, material, MAX_WALKERS);
     this.tanks = new THREE.InstancedMesh(tankParts(), material.clone(), MAX_TANKS);
-    for (const mesh of [this.walkers, this.armsL, this.armsR, this.tanks]) {
+    for (const mesh of [this.walkers, this.armsL, this.armsR, this.legsL, this.legsR, this.tanks]) {
       mesh.castShadow = true;
       mesh.count = 0;
       // Las instancias se mueven por todo el mapa: el "bounding sphere" de la malla original no
@@ -168,12 +207,17 @@ export class ZombieView {
     this.corpses.receiveShadow = true;
     this.corpses.frustumCulled = false;
 
-    this.root.add(this.walkers, this.armsL, this.armsR, this.tanks, this.corpses, this.walkerGhosts, this.tankGhosts);
+    this.root.add(this.walkers, this.armsL, this.armsR, this.legsL, this.legsR, this.tanks, this.corpses, this.walkerGhosts, this.tankGhosts);
   }
 
   /** alpha: fracción entre el paso anterior y el actual, para interpolar posiciones. */
   update(state: GameState, grid: TileGrid, viewerX: number, viewerY: number, alpha: number): void {
     this.time = state.time;
+    const now = performance.now() / 1000;
+    this.frameDt = this.lastFrame ? Math.min(0.1, now - this.lastFrame) : 0;
+    this.lastFrame = now;
+    // Cada tanto se olvida la fase de los zombies que ya no están (muertos o lejos).
+    if (this.gait.size > 1500) for (const [id, g] of this.gait) if (now - g.seen > 3) this.gait.delete(id);
     let walkers = 0;
     let tanks = 0;
     for (const z of state.zombies) {
@@ -181,7 +225,10 @@ export class ZombieView {
       const x = z.prevX + (z.x - z.prevX) * alpha;
       const y = z.prevY + (z.y - z.prevY) * alpha;
       if (Math.abs(x - viewerX) > DRAW_DISTANCE || Math.abs(y - viewerY) > DRAW_DISTANCE) continue;
-      if (!lineOfSight(grid, viewerX, viewerY, x, y)) continue;
+      // El de un techo está dentro del edificio: se prueba la vista hasta el borde, frente a él.
+      const lx = z.perch !== undefined ? x + Math.cos(z.facing) * 0.9 : x;
+      const ly = z.perch !== undefined ? y + Math.sin(z.facing) * 0.9 : y;
+      if (!lineOfSight(grid, viewerX, viewerY, lx, ly)) continue;
       // La silueta se apaga con la distancia: lo lejano y oscuro sigue siendo una amenaza invisible.
       const d = Math.hypot(x - viewerX, y - viewerY);
       const ghost = Math.max(0, 1 - d / GHOST_DISTANCE);
@@ -198,6 +245,8 @@ export class ZombieView {
     this.finish(this.walkers, walkers);
     this.finish(this.armsL, walkers);
     this.finish(this.armsR, walkers);
+    this.finish(this.legsL, walkers);
+    this.finish(this.legsR, walkers);
     this.finish(this.tanks, tanks);
     this.finish(this.walkerGhosts, walkers);
     this.finish(this.tankGhosts, tanks);
@@ -249,10 +298,7 @@ export class ZombieView {
     const walker = mesh === this.walkers;
     const ghost = walker ? this.walkerGhosts : this.tankGhosts;
     ghost.setMatrixAt(index, this.matrix);
-    if (walker) {
-      this.armsL.setMatrixAt(index, z.limbs & LIMB_ARM_L ? this.hidden : this.matrix);
-      this.armsR.setMatrixAt(index, z.limbs & LIMB_ARM_R ? this.hidden : this.matrix);
-    }
+    if (walker) this.writeLimbs(index, z, crawling);
 
     if (z.hitFlash > 0) {
       this.color.setHex(0xffffff);
@@ -288,7 +334,54 @@ export class ZombieView {
     if (walker) {
       this.armsL.setColorAt(index, this.color);
       this.armsR.setColorAt(index, this.color);
+      // Las piernas un poco más oscuras (pantalón sucio).
+      this.color.multiplyScalar(0.7);
+      this.legsL.setColorAt(index, this.color);
+      this.legsR.setColorAt(index, this.color);
     }
+  }
+
+  /**
+   * Brazos y piernas articulados. La fase avanza con lo que camina (rápido = pasos rápidos);
+   * las piernas van en contrafase y los brazos estirados se mecen un poco, a destiempo.
+   */
+  private writeLimbs(index: number, z: Zombie, crawling: boolean): void {
+    let g = this.gait.get(z.id);
+    if (!g) {
+      g = { phase: z.id * 1.7, seen: 0 };
+      this.gait.set(z.id, g);
+    }
+    g.seen = this.lastFrame;
+    const speed = Math.hypot(z.x - z.prevX, z.y - z.prevY) * 60;
+    g.phase += speed * PHASE_PER_TILE * this.frameDt;
+    const stride = Math.min(1, speed / 1.2) * STRIDE_SWING * (z.kind === 'runner' ? 1.4 : 1);
+    // En el aire (saltando, volando) patalea; parado, apenas se balancea.
+    const flail = z.air > 0 ? Math.sin(this.time * 14 + z.id) * 0.6 : 0;
+    const swing = Math.sin(g.phase) * stride + flail;
+    const sway = Math.sin(this.time * 2.1 + z.id) * 0.06;
+
+    const leg = (mesh: THREE.InstancedMesh, side: number, angle: number) => {
+      if (crawling) {
+        mesh.setMatrixAt(index, this.hidden);
+        return;
+      }
+      this.local.makeRotationZ(angle).setPosition(0, HIP_Y, side * HIP_Z);
+      mesh.setMatrixAt(index, this.limb.multiplyMatrices(this.matrix, this.local));
+    };
+    leg(this.legsL, -1, swing);
+    leg(this.legsR, 1, -swing);
+
+    const arm = (mesh: THREE.InstancedMesh, side: number, bit: number, angle: number) => {
+      if (z.limbs & bit) {
+        mesh.setMatrixAt(index, this.hidden);
+        return;
+      }
+      // Ángulo levemente hacia abajo (brazos estirados que pesan) más el vaivén del paso.
+      this.local.makeRotationZ(-0.12 + angle).setPosition(SHOULDER_X, SHOULDER_Y, side * SHOULDER_Z);
+      mesh.setMatrixAt(index, this.limb.multiplyMatrices(this.matrix, this.local));
+    };
+    arm(this.armsL, -1, LIMB_ARM_L, -swing * 0.35 + sway);
+    arm(this.armsR, 1, LIMB_ARM_R, swing * 0.35 - sway);
   }
 
   /** La silueta usa la misma matriz que el zombie (se escribe justo después, ver write). */
@@ -328,7 +421,8 @@ export class ZombieView {
       (mesh.material as THREE.Material).dispose();
       mesh.dispose();
     }
-    for (const mesh of [this.walkers, this.armsL, this.armsR, this.tanks, this.corpses]) {
+    // armsL/armsR y legsL/legsR comparten geometría: dispose() repetido no hace daño.
+    for (const mesh of [this.walkers, this.armsL, this.armsR, this.legsL, this.legsR, this.tanks, this.corpses]) {
       mesh.geometry.dispose();
       (mesh.material as THREE.Material).dispose();
       mesh.dispose();
