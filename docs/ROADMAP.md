@@ -59,9 +59,23 @@ porque cada disparo traía a toda la ciudad.
   vio te caza durante 35 s, así que ya no se lo pierde de vista doblando una esquina.
 - **La sonámbula** (14e): un especial ciego en la ruta corta. Hay que pasarla agachado y con la linterna apagada.
   Despierta, grita y te caza durante 30 s.
-- **Descartado para el prototipo**: personajes articulados (más polígonos). Quedan para la versión en Godot.
+- Los personajes articulados, que antes estaban descartados, se hicieron en el hito 15e.
 - **Pendiente de probar jugando**: el balance de las oleadas. Un bot quieto con escopeta no aguanta el
   helicóptero; las constantes están juntas al principio de `src/game/escape.ts`.
+
+## Hito 15: zombies que no se quedan mirando, y un tanque de verdad
+Feedback de Wilbert: zombies trabados mirando tras vallas y barricadas, ácido invisible en la plaza, faltaban pasos
+y sonidos propios, y el tanque se sentía tonto y lento.
+- **Saltos** (15a): zombies y tanque saltan vallas, barricadas, sacos y autos si la ruta los bloquea.
+- **Sonido y ácido** (15b): charcos más arriba y pulsantes, aviso al pisarlos, pasos propios y de los zombies,
+  un sonido propio por especial y ondas visibles cuando grita el gritón.
+- **Tanque** (15c): más rápido; salta y aplasta un área, levanta barriles o zombies y te los lanza.
+- **Llamas y techos** (15d): corredores en llamas inmunes al fuego que dejan fuego al morir; zombies en los techos
+  que saltan al verte.
+- **Articulados** (15e): zombies con piernas y brazos que caminan (5 InstancedMesh, giros en cadera y hombro) y
+  jugador articulado.
+- **Primera persona** (15f, experimental): tecla P. Solo cambia la cámara y el input; la simulación es la misma.
+- **Pendiente**: agrandar la plaza de la defensa si sigue sintiéndose chica.
 
 ## Para más adelante
 - Crescendos: eventos que tú disparas (una alarma, abrir una reja) y que traen una horda a cambio de algo.
@@ -71,4 +85,5 @@ porque cada disparo traía a toda la ciudad.
 - Supervivientes vivos y autos que se mueven.
 
 ## Descartado
-- Refugios (ya hay botiquines), superpoderes y mejoras, cámara en primera o tercera persona.
+- Refugios (ya hay botiquines), superpoderes y mejoras, cámara en tercera persona. (La primera persona volvió
+  como experimento en el hito 15f.)
