@@ -1,6 +1,7 @@
 # Hoja de ruta (después del hito 10)
 
 Acordado con Wilbert tras probar el hito 10. Orden: primero arreglar lo que está roto, después sumar.
+Lo que más le gusta: la variedad de edificios y escenarios.
 
 ## Hito 11: que el sigilo y las hordas funcionen
 - **Faroles**: tramos de calle iluminados y otros oscuros. Bajo la luz te ven de lejos aunque vayas agachado;
@@ -14,25 +15,39 @@ Acordado con Wilbert tras probar el hito 10. Orden: primero arreglar lo que est�
   corta el paso), envolvente (se abre en abanico) y acechador (espera en los cruces).
 - **Aviso del tanque**: rugido fuerte y distinto al cargar la roca, la roca levantada sobre la cabeza y una
   marca en el suelo donde va a caer.
+- **Dash y estamina**: impulso corto con un instante de invulnerabilidad; la estamina se comparte entre correr,
+  el dash y los golpes cuerpo a cuerpo.
 
 ## Hito 12: juguetes nuevos
 - Molotov: zona de fuego temporal que corta una calle.
-- Cuerpo a cuerpo: hacha (lenta, decapita), machete (rápido, en abanico), mazo (empuja a varios); se gastan
-  con el uso, el bate no.
+- Cuerpo a cuerpo: hacha (lenta, decapita), machete (rápido, en abanico), mazo (empuja a varios) y katana
+  (rápida, desmiembra); se gastan con el uso, el bate no.
+- Desmembramiento sin modelos complejos: el zombie pierde una parte suelta de forma dramática. Sin brazos no
+  ataca, sin piernas se arrastra, sin cabeza muere.
+- Armas especiales muy raras, con munición propia, que se sueltan al vaciarse: minigun, lanzallamas y
+  lanzacohetes.
 - Trampas que atraen hordas: alarmas de auto (dispararle a un auto), petardos lanzables, radio encendida.
 - Escupidor: ácido a distancia que deja un charco dañino.
-- Subfusil tan común como la escopeta (el resto del loot queda como está).
+- Lanzamiento de suministros: una bengala marca una caja con buen loot que atrae a toda la zona.
+- Subfusil tan común como la escopeta (el resto del loot queda como está: que se gaste rápido es divertido).
 
-## Hito 13: ambiente
+## Hito 13: escenarios y ambiente
+- **Tipos de manzana**: parque (árboles que tapan la vista), estacionamiento (autos y alarmas), gasolinera
+  (barriles), construcción (pasillos estrechos), barrio de casas con patios y rejas, retén militar (mejor
+  loot, zombies duros), canal con puentes (pasos obligados), hospital (botiquines y un especial).
 - Calles cortadas variadas: buses cruzados, escombros, choques de autos, vallas de policía.
-- Autos en llamas (luz de fuego), faroles que parpadean, basura, humo, bengalas.
-- Rastros de supervivientes: grafitis con flechas hacia las salidas, campamentos abandonados con loot.
+- Decoración: autos en llamas, faroles que parpadean, basura, humo, rastros de supervivientes (grafitis
+  con flechas a las salidas, campamentos abandonados).
+- Clima por seed: lluvia (te oyen menos, ves menos) o niebla.
+- Sonido ambiente sintetizado (viento, sirenas y disparos lejanos, perros, gemidos según cuántos zombies hay
+  cerca) y música en capas que sube con la tensión (explorar, te vieron, horda). Wilbert genera la música con
+  Gemini; los cortes de loop se resuelven con un fundido cruzado entre dos copias.
 
-## Descartado o para más adelante
-- Refugios: descartado (ya hay botiquines).
-- Supervivientes vivos (aliados o saqueadores): fuera del prototipo.
-- Autos que se mueven o que el tanque lanza: hoy son tiles del mundo fijo; es un cambio grande.
+## Para más adelante
+- Bloquear calles empujando objetos (complementa el sigilo; hay que diseñarlo).
+- Perro compañero (duda: ladrar atraería a la horda; quizás gruñe bajito).
+- Progreso entre partidas tipo roguelite (para la versión final).
+- Supervivientes vivos y autos que se mueven.
 
-## En conversación (no acordado todavía)
-Sonido ambiente y música, nuevos tipos de manzana, armas especiales, desmembramiento, cámaras alternativas,
-dash y estamina.
+## Descartado
+- Refugios (ya hay botiquines), superpoderes y mejoras, cámara en primera o tercera persona.
