@@ -222,6 +222,7 @@ export function updateCombat(state: GameState, rt: ZombieRuntime, intent: Combat
       weapon.mags[weapon.current] += taken;
       weapon.ammo[gun.ammo] -= taken;
       weapon.reloadTimer = 0;
+      state.events.push({ type: 'sfx', name: 'reloaded', x: state.player.x, y: state.player.y });
     }
   }
 
@@ -325,6 +326,12 @@ function shoot(state: GameState, rt: ZombieRuntime, id: GunId): void {
   const quiet = id === 'pistol' && state.weapon.suppressor;
   makeNoise(state, player.x, player.y, quiet ? SUPPRESSED_NOISE : gun.noise, rt);
   state.noiseHeat += quiet ? 0.15 : HEAT_PER_SHOT[id];
+
+  // Se vació el cargador: recarga sola si hay reserva (no hace falta apretar R ni volver a disparar).
+  if (!isSpecial(id) && weapon.mags[id] <= 0) {
+    if (gun.ammo && weapon.ammo[gun.ammo] > 0) startReload(state);
+    else state.events.push({ type: 'message', text: `${gun.name} sin balas: cambia de arma [Q] o usa el cuerpo a cuerpo [1]`, tone: 'danger' });
+  }
 
   // Una especial vacía se tira: no hay de dónde recargarla.
   if (isSpecial(id) && weapon.mags[id] <= 0) {

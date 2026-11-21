@@ -322,6 +322,7 @@ export type SfxName =
   | 'murmur'
   | 'step'
   | 'reload'
+  | 'reloaded'
   | 'empty'
   | 'takedown'
   | 'spotted'

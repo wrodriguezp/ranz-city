@@ -132,3 +132,32 @@ canvas { cursor: crosshair; }
 #game-hud .slots .slot { padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.08); color: #bbb; }
 #game-hud .slots .slot.on { background: #ffd25a; color: #111; font-weight: bold; }
 #game-hud .slots .slot.none { opacity: 0.25; }
+
+/* --- Indicadores junto a la mira y bajo el jugador (ui/gauges.ts) ---------------------------- */
+#gauges { position: fixed; inset: 0; pointer-events: none; z-index: 3; }
+#gauges .cursor-tag {
+  position: absolute; left: 0; top: 0; transform-origin: 0 0; white-space: nowrap;
+  font: bold 13px system-ui, sans-serif; color: #f2f2f2; text-shadow: 0 0 3px #000, 0 1px 2px #000;
+}
+#gauges .cursor-tag .name { font-size: 10px; letter-spacing: 1.5px; color: #cfd6dc; opacity: 0.85; }
+#gauges .cursor-tag .mag { font-size: 22px; }
+#gauges .cursor-tag .mag.low { color: #ffb347; }
+#gauges .cursor-tag .sub { font-size: 13px; color: #b9c0c6; }
+#gauges .cursor-tag .out { font-size: 15px; color: #ff5a4d; }
+#gauges .cursor-tag .reload { font-size: 12px; color: #ffd25a; letter-spacing: 1px; }
+#gauges .cursor-tag .rbar { width: 70px; height: 4px; margin-top: 3px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; }
+#gauges .cursor-tag .rfill { height: 100%; background: #ffd25a; }
+#gauges .cursor-tag .hint { font-size: 11px; color: #ffd25a; }
+#gauges .player-bars { position: absolute; left: 0; top: 0; width: 64px; transform-origin: 0 0; display: flex; flex-direction: column; gap: 2px; }
+#gauges .pbar { height: 4px; background: rgba(0, 0, 0, 0.55); border-radius: 2px; overflow: hidden; box-shadow: 0 0 2px #000; }
+#gauges .pfill { height: 100%; width: 100%; }
+#gauges .pfill.hp { background: #6fd36f; }
+#gauges .pfill.hp.low { background: #e04545; }
+#gauges .pfill.air { background: #8fd0ff; }
+#gauges .pfill.air.low { background: #b8873f; }
+#gauges .pfill.light { background: #f2d16b; }
+#gauges .pfill.light.low { background: #c77d2b; }
+#gauges .pfill.light.off { opacity: 0.35; }
+
+/* En pantallas grandes, el resto del HUD crece con --ui (lo fija main.ts según la altura). */
+#hud, #minimap, #game-hud .panel, #game-hud .messages, #game-hud .prompt, #game-hud .stealth { zoom: var(--ui, 1); }

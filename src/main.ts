@@ -29,6 +29,7 @@ import { PlayerView } from './render/playerView';
 import { ZombieView } from './render/zombieView';
 import { Hud } from './ui/hud';
 import { DamageText } from './ui/damageText';
+import { Gauges, uiScale } from './ui/gauges';
 import { Sfx } from './audio/sfx';
 import { Music, type MusicMood } from './audio/music';
 import { generateCity, type City } from './world/city';
@@ -97,6 +98,14 @@ const hazardsView = new HazardsView(effects);
 scene.add(hazardsView.root);
 const gameHud = new Hud();
 const damageText = new DamageText();
+const gauges = new Gauges();
+/** Tamaño de la interfaz según la resolución (en 1440p o 4K, todo un poco más grande). */
+let ui = 1;
+function applyUiScale(): void {
+  ui = uiScale();
+  document.documentElement.style.setProperty('--ui', String(ui));
+}
+applyUiScale();
 /**
  * Pausa de impacto ("hitstop"): al matar o dar un golpe fuerte, la simulación se congela unos
  * pocos milisegundos. Es casi imperceptible como pausa, pero hace que el golpe se SIENTA pesado.
@@ -230,6 +239,7 @@ function setMode(next: Mode): void {
   mode = next;
   gameHud.setVisible(mode === 'play');
   damageText.setVisible(mode === 'play');
+  gauges.setVisible(mode === 'play');
   mapView?.setVisible(mode === 'play');
   reviewControls.enabled = mode === 'review';
   lighting.setDaylight(mode === 'review');
@@ -364,6 +374,7 @@ function frame(now: number): void {
     effects.update(frameDt);
     gameHud.update(state, now / 1000, lightAt(city.lights, state.player.x, state.player.y, state.time));
     damageText.update(gameCamera.camera, now / 1000);
+    gauges.update(state, gameCamera.camera, input.mouse, x, y, ui);
     propsView?.update(state, now / 1000);
     const radio = escapePrompt(state, city.evac);
     const prompt = radio.text ? radio : searchPrompt(state, city.props);
@@ -590,6 +601,7 @@ renderer.domElement.addEventListener(
 window.addEventListener('resize', () => {
   renderer.setSize(window.innerWidth, window.innerHeight);
   resizeCameras();
+  applyUiScale();
 });
 
 resizeCameras();

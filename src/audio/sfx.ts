@@ -236,13 +236,29 @@ export class Sfx {
       case 'step':
         this.step(this.place(x, y, l, 0.18));
         break;
-      case 'reload':
-        this.click(this.place(x, y, l, 0.5), 0, 2200);
-        this.click(this.place(x, y, l, 0.6), 1.25, 1500);
+      case 'reload': {
+        // Sacar el cargador: un clac metálico y el golpe sordo del cargador vacío.
+        const out = this.place(x, y, l, 1);
+        this.click(out, 0, 1800);
+        this.click(out, 0.05, 1200);
+        if (out) this.burst(out, 0.12, 0.08, 'lowpass', 500, 0.7, 1);
         break;
-      case 'empty':
-        this.click(this.place(x, y, l, 0.6), 0, 3000);
+      }
+      case 'reloaded': {
+        // Meter el cargador y montar el arma: clac-chac, bien audible para saber que ya puedes disparar.
+        const out = this.place(x, y, l, 1);
+        this.click(out, 0, 1400);
+        if (out) this.burst(out, 0.09, 0.07, 'bandpass', 2600, 0.9, 3);
+        this.click(out, 0.17, 3200);
         break;
+      }
+      case 'empty': {
+        // Gatillo en vacío: dos clics secos y agudos.
+        const out = this.place(x, y, l, 1);
+        this.click(out, 0, 4200);
+        this.click(out, 0.07, 3600);
+        break;
+      }
       case 'takedown':
         this.hit(this.place(x, y, l, 1));
         this.crunch(this.place(x, y, l, 0.7));
