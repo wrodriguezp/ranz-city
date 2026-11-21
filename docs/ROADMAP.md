@@ -42,6 +42,9 @@ Lo que más le gusta: la variedad de edificios y escenarios.
 - Sonido ambiente sintetizado (viento, sirenas y disparos lejanos, perros, gemidos según cuántos zombies hay
   cerca) y música en capas que sube con la tensión (explorar, te vieron, horda). Wilbert genera la música con
   Gemini; los cortes de loop se resuelven con un fundido cruzado entre dos copias.
+- **Estado**: hecho, salvo los patios con rejas del barrio de casas (hoy son casas sueltas con techo) y que los
+  faroles que parpadean siguen siendo los del hito 11. La música usa explorar/tensión/horda/escape de
+  `src/music`; si falta una pista, ese estado usa la de menos intensidad.
 
 ## Para más adelante
 - Bloquear calles empujando objetos (complementa el sigilo; hay que diseñarlo).

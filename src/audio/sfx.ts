@@ -12,6 +12,7 @@
 // aquí se decide el volumen según la distancia y el paneo izquierda/derecha según la pantalla.
 
 import type { GameEvent } from '../game/state';
+import type { Weather } from '../world/weather';
 
 export interface Listener {
   x: number;
@@ -33,6 +34,13 @@ export class Sfx {
   private readonly last = new Map<string, number>();
   private nextAmbient = 4;
   private nextHeartbeat = 0;
+  /** Bus de la música (pasa por el master: el mute y el compresor también la afectan). */
+  private musicBus: GainNode | null = null;
+  /** Cama continua de viento/lluvia y su clima. */
+  private weather: Weather = 'clear';
+  private bed: { wind: GainNode; rain: GainNode } | null = null;
+  /** Próximo sonido lejano (sirena, disparos, perro, grito). */
+  private nextDistant = 6;
 
   constructor() {
     // Los navegadores solo dejan crear audio después de una interacción del usuario.
@@ -63,6 +71,64 @@ export class Sfx {
     this.noise = this.ctx.createBuffer(1, length, this.ctx.sampleRate);
     const data = this.noise.getChannelData(0);
     for (let i = 0; i < length; i++) data[i] = Math.random() * 2 - 1;
+    this.musicBus = this.ctx.createGain();
+    this.musicBus.gain.value = 0.55;
+    this.musicBus.connect(this.master);
+  }
+
+  /** Contexto y bus para la música (null hasta que el jugador interactúe con la página). */
+  musicOutput(): { ctx: AudioContext; out: GainNode } | null {
+    return this.ctx && this.musicBus ? { ctx: this.ctx, out: this.musicBus } : null;
+  }
+
+  /** Clima de la partida: cambia la cama de ambiente (con lluvia, el viento baja y suena el agua). */
+  setWeather(weather: Weather): void {
+    this.weather = weather;
+    this.applyBed();
+  }
+
+  /**
+   * Cama de ambiente: ruido que suena siempre, muy bajo.
+   *  - Viento: ruido por un pasa-bajos cuya frecuencia oscila lento (un LFO de 0.07 Hz): ráfagas.
+   *  - Lluvia: ruido más agudo (pasa-banda alrededor de 2-5 kHz): el "shhh" de las gotas.
+   */
+  private ensureBed(): void {
+    if (this.bed || !this.ctx) return;
+    const ctx = this.ctx;
+    const source = (lowpass: number, highpass: number) => {
+      const src = ctx.createBufferSource();
+      src.buffer = this.noise;
+      src.loop = true;
+      const lp = ctx.createBiquadFilter();
+      lp.type = 'lowpass';
+      lp.frequency.value = lowpass;
+      const hp = ctx.createBiquadFilter();
+      hp.type = 'highpass';
+      hp.frequency.value = highpass;
+      const gain = ctx.createGain();
+      gain.gain.value = 0;
+      src.connect(hp).connect(lp).connect(gain).connect(this.master!);
+      src.start();
+      return { lp, gain };
+    };
+    const wind = source(420, 60);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 0.07;
+    const depth = ctx.createGain();
+    depth.gain.value = 260;
+    lfo.connect(depth).connect(wind.lp.frequency);
+    lfo.start();
+    const rain = source(6000, 1800);
+    this.bed = { wind: wind.gain, rain: rain.gain };
+    this.applyBed();
+  }
+
+  private applyBed(): void {
+    if (!this.bed || !this.ctx) return;
+    const t = this.ctx.currentTime;
+    const windLevel = this.weather === 'rain' ? 0.05 : this.weather === 'fog' ? 0.04 : 0.09;
+    this.bed.wind.gain.setTargetAtTime(windLevel, t, 1.5);
+    this.bed.rain.gain.setTargetAtTime(this.weather === 'rain' ? 0.11 : 0, t, 1.5);
   }
 
   /** Procesa los eventos de los pasos de este cuadro. */
@@ -114,6 +180,13 @@ export class Sfx {
    */
   ambient(dt: number, l: Listener, zombies: readonly { x: number; y: number; hp: number }[], hp: number): void {
     if (!this.ctx || this.ctx.state !== 'running') return;
+    this.ensureBed();
+    // La ciudad muere a lo lejos: cada tanto, algo suena fuera de la vista.
+    this.nextDistant -= dt;
+    if (this.nextDistant <= 0) {
+      this.distantEvent();
+      this.nextDistant = 9 + Math.random() * 16;
+    }
     this.nextAmbient -= dt;
     if (this.nextAmbient <= 0) {
       // Un zombie al azar entre los cercanos.
@@ -619,6 +692,65 @@ export class Sfx {
     if (!out) return;
     this.burst(out, 0, 0.16, 'bandpass', 700, 0.45, 0.6);
     this.burst(out, 0, 0.12, 'lowpass', 250, 0.4);
+  }
+
+  // --- Lejanos -------------------------------------------------------------------------------
+
+  /**
+   * Un sonido "lejano" pasa por un pasa-bajos (lo agudo se pierde con la distancia, por eso de
+   * lejos todo suena sordo) y un paneo al azar: viene de algún lugar de la ciudad.
+   */
+  private distantOut(volume: number): AudioNode {
+    const ctx = this.ctx!;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.value = 900 + Math.random() * 600;
+    const gain = ctx.createGain();
+    // Con lluvia se oye menos lo lejano (igual que les pasa a los zombies).
+    gain.gain.value = volume * (this.weather === 'rain' ? 0.6 : 1);
+    const pan = ctx.createStereoPanner();
+    pan.pan.value = Math.random() * 1.6 - 0.8;
+    lp.connect(gain).connect(pan).connect(this.master!);
+    return lp;
+  }
+
+  private distantEvent(): void {
+    const roll = Math.random();
+    if (roll < 0.25) {
+      // Sirena: dos subidas y bajadas lentas (un "uuuuo-uuuuo").
+      const out = this.distantOut(0.07);
+      for (let i = 0; i < 3; i++) {
+        this.tone(out, i * 1.6, 'triangle', 560, 880, 0.8, 0.6);
+        this.tone(out, i * 1.6 + 0.8, 'triangle', 880, 560, 0.8, 0.6);
+      }
+    } else if (roll < 0.5) {
+      // Otro superviviente disparando: una ráfaga corta e irregular.
+      const out = this.distantOut(0.22);
+      let at = 0;
+      for (let i = 0, n = 2 + Math.floor(Math.random() * 4); i < n; i++) {
+        this.burst(out, at, 0.25, 'lowpass', 1800, 1);
+        this.tone(out, at, 'sine', 120, 40, 0.18, 0.8);
+        at += 0.15 + Math.random() * 0.6;
+      }
+    } else if (roll < 0.72) {
+      // Un perro ladrando: ruido con un filtro resonante (la "boca") y un tono que cae.
+      const out = this.distantOut(0.18);
+      for (let i = 0, n = 2 + Math.floor(Math.random() * 3); i < n; i++) {
+        const at = i * (0.3 + Math.random() * 0.15);
+        this.burst(out, at, 0.12, 'bandpass', 750, 1, 5);
+        this.tone(out, at, 'sawtooth', 520, 340, 0.11, 0.35);
+      }
+    } else if (roll < 0.88) {
+      // Un grito humano lejano: una senoidal aguda con vibrato que se quiebra hacia abajo.
+      const out = this.distantOut(0.06);
+      this.tone(out, 0, 'sawtooth', 900, 620, 1.1, 0.5);
+      this.burst(out, 0, 0.9, 'bandpass', 1100, 0.4, 3);
+    } else {
+      // Algo pesado que se cae (vidrios y metal).
+      const out = this.distantOut(0.2);
+      this.burst(out, 0, 0.6, 'lowpass', 600, 1);
+      for (let i = 0; i < 5; i++) this.burst(out, 0.05 + i * 0.07, 0.08, 'highpass', 3000 + i * 400, 0.4);
+    }
   }
 
   private heartbeat(): void {

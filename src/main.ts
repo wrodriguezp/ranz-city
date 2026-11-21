@@ -30,6 +30,7 @@ import { ZombieView } from './render/zombieView';
 import { Hud } from './ui/hud';
 import { DamageText } from './ui/damageText';
 import { Sfx } from './audio/sfx';
+import { Music, type MusicMood } from './audio/music';
 import { generateCity, type City } from './world/city';
 import { lightAt } from './world/streetLights';
 import { addStreetLightTo, setStreetLightIntensity, StreetLightView } from './render/streetLightView';
@@ -102,6 +103,7 @@ const damageText = new DamageText();
  */
 let hitstop = 0;
 const sfx = new Sfx();
+const music = new Music(() => sfx.musicOutput());
 let propsView: PropsView | undefined;
 let explosivesView: ExplosivesView | undefined;
 let mapView: MapView | undefined;
@@ -174,6 +176,8 @@ function loadCity(seedText: string): void {
 
 /** Empieza (o reinicia) la partida en la ciudad actual. */
 function startGame(): void {
+  sfx.setWeather(city.weather);
+  music.reset();
   state = createGameState(city);
   runtime = createRuntime(city);
   previous.x = state.player.x;
@@ -351,6 +355,7 @@ function frame(now: number): void {
     const listener = { x, y, rightX: axes.rightX, rightY: axes.rightY };
     sfx.handle(state.events, listener);
     if (!screens.current) sfx.ambient(frameDt, listener, state.zombies, state.player.hp);
+    music.update(musicMood(x, y), frameDt);
     effects.handle(state.events, city.seed % 1000);
     damageText.handle(state.events, now / 1000);
     feel(state.events);
@@ -434,7 +439,7 @@ function updateHud(): void {
     text =
       `<b>ZOMBIE CITY</b> · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
       `zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s · ruido ${state.noiseHeat.toFixed(1)}` +
-      ` · linterna ${light.on ? 'on' : 'off'}\n` +
+      ` · linterna ${light.on ? 'on' : 'off'} · música ${music.status}\n` +
       `[Esc] pausa y controles  [V] vista de revisión  [F3] grafo`;
   } else {
     const exits = city.layout.exits
@@ -512,6 +517,19 @@ document.getElementById('screen')!.addEventListener('pointerdown', (event) => {
 });
 
 /** Datos para las pantallas de fin (y la seed en las de inicio/pausa). */
+/**
+ * Qué música corresponde: escape si estás esperando una evacuación (o ya bajó el helicóptero),
+ * horda si te persiguen muchos, tensión si te persigue alguno, y si no, explorar.
+ */
+function musicMood(x: number, y: number): MusicMood {
+  if (state.status !== 'playing') return 'explore';
+  if (state.escape.finale || state.escape.progress.some((p) => p > 0)) return 'escape';
+  let chasing = 0;
+  for (const z of state.zombies) if (z.mode === 'chase' && Math.abs(z.x - x) < 25 && Math.abs(z.y - y) < 25) chasing++;
+  if (chasing >= 8) return 'horde';
+  return chasing > 0 ? 'tension' : 'explore';
+}
+
 function summary() {
   const t = Math.floor(state.time);
   const via = state.escape.escapedVia;
