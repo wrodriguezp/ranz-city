@@ -1,0 +1,163 @@
+html, body {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #0b0d10;
+  font-family: ui-monospace, Consolas, monospace;
+}
+canvas { display: block; }
+#hud {
+  position: fixed;
+  top: 12px;
+  left: 12px;
+  padding: 10px 14px;
+  background: rgba(0, 0, 0, 0.65);
+  color: #e6e6e6;
+  font-size: 13px;
+  line-height: 1.5;
+  border-radius: 6px;
+  pointer-events: none;
+  white-space: pre;
+}
+#hud b { color: #ffb347; }
+
+/* --- HUD de juego --------------------------------------------------------------------------- */
+canvas { cursor: crosshair; }
+#hud { font-size: 11px; opacity: 0.8; }
+#game-hud { position: fixed; inset: 0; pointer-events: none; color: #e6e6e6; }
+#game-hud .vignette {
+  position: absolute; inset: 0; opacity: 0;
+  background: radial-gradient(ellipse at center, transparent 45%, rgba(170, 0, 0, 0.75) 100%);
+}
+#game-hud .panel {
+  position: absolute; background: rgba(0, 0, 0, 0.6); border-radius: 6px; padding: 10px 14px; font-size: 13px;
+}
+#game-hud .status { left: 12px; bottom: 12px; min-width: 300px; }
+#game-hud .row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+#game-hud .label { width: 34px; color: #9aa; font-size: 11px; }
+#game-hud .num { width: 40px; text-align: right; }
+#game-hud .bar { flex: 1; height: 10px; background: rgba(255, 255, 255, 0.12); border-radius: 3px; overflow: hidden; }
+#game-hud .fill { height: 100%; width: 100%; background: #6fd36f; transition: width 0.15s; }
+#game-hud .fill.health.low { background: #e04545; }
+#game-hud .fill.battery { background: #f2d16b; }
+#game-hud .fill.battery.low { background: #c77d2b; }
+#game-hud .fill.stamina { background: #7fd38b; transition: width 0.1s linear; }
+#game-hud .fill.stamina.low { background: #b8873f; }
+#game-hud .weapon { margin-top: 4px; }
+#game-hud .weapon b, #game-hud .items b { color: #ffb347; }
+#game-hud .items { margin-top: 4px; font-size: 12px; color: #bbb; }
+#game-hud .dim { color: #888; }
+#game-hud .messages {
+  position: absolute; top: 18%; left: 50%; transform: translateX(-50%);
+  display: flex; flex-direction: column; align-items: center; gap: 6px;
+}
+#game-hud .message {
+  background: rgba(0, 0, 0, 0.65); padding: 6px 14px; border-radius: 4px; font-size: 15px; white-space: nowrap;
+}
+#game-hud .message.danger { color: #ff7a6b; }
+#game-hud .message.good { color: #8fe08f; }
+#game-hud .prompt {
+  position: absolute; bottom: 22%; left: 50%; transform: translateX(-50%); display: none;
+  background: rgba(0, 0, 0, 0.7); padding: 8px 16px; border-radius: 4px; font-size: 14px; text-align: center;
+}
+#game-hud .prompt .bar { margin-top: 6px; height: 6px; }
+#game-hud .prompt .fill { background: #ffb347; transition: none; }
+
+/* --- Mapa ------------------------------------------------------------------------------------ */
+#minimap { position: fixed; top: 12px; right: 12px; pointer-events: none; }
+#fullmap {
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.55); pointer-events: none; color: #ddd; font: 14px system-ui, sans-serif;
+}
+#fullmap .title { margin-bottom: 8px; letter-spacing: 2px; }
+#fullmap .dim { color: #888; }
+
+/* --- Evacuación y pantallas ------------------------------------------------------------------ */
+#game-hud .evac { top: 214px; right: 12px; min-width: 190px; text-align: right; }
+#game-hud .evac .clock { font-size: 26px; font-weight: bold; letter-spacing: 2px; color: #fff; margin-bottom: 4px; }
+#game-hud .evac .exit { font-size: 13px; margin-top: 2px; }
+#game-hud .evac .exit.soon { color: #ff7a6b; }
+#game-hud .evac .exit.closed { color: #666; text-decoration: line-through; }
+#game-hud .evac .exit.always { color: #8fe08f; }
+#screen {
+  position: fixed; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  background: rgba(3, 4, 8, 0.82); color: #ddd; font: 15px system-ui, sans-serif; text-align: center; z-index: 10;
+}
+#screen h1 { font-size: 54px; letter-spacing: 8px; margin: 0 0 12px; color: #ffb347; }
+#screen.lost h1 { color: #ff5a4d; }
+#screen.won h1 { color: #8fe08f; }
+#screen .lead { max-width: 640px; line-height: 1.5; color: #bbb; }
+#screen .seed { margin: 10px 0; color: #999; }
+#screen .seed b { color: #ffb347; font-size: 18px; }
+#screen .controls {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 6px 28px; margin: 18px 0; text-align: left; font-size: 14px;
+}
+#screen .controls b { color: #ffb347; }
+#screen .stats { display: flex; gap: 36px; margin: 16px 0; }
+#screen .stats span { display: block; color: #888; font-size: 12px; }
+#screen .stats b { font-size: 26px; }
+#screen .action { margin-top: 18px; color: #fff; }
+#screen .action b { color: #ffb347; }
+
+#game-hud .stealth {
+  position: absolute; left: 50%; bottom: 16px; transform: translateX(-50%);
+  font: 12px system-ui, sans-serif; letter-spacing: 2px; text-transform: uppercase;
+}
+#game-hud .stealth .dim { color: #555; }
+#game-hud .stealth .hidden { color: #8fd0ff; }
+#game-hud .stealth .seen { color: #ff6b5b; font-weight: bold; }
+
+/* Indicador de interacción y barra de "registrando" */
+#game-hud .prompt { font-size: 15px; padding: 8px 14px; min-width: 220px; text-align: center; }
+#game-hud .prompt .key {
+  display: inline-block; min-width: 20px; padding: 1px 6px; margin-right: 6px; border-radius: 4px;
+  background: #ffd25a; color: #111; font-weight: bold;
+}
+#game-hud .prompt .bar { margin-top: 8px; height: 8px; }
+#game-hud .prompt .fill { background: #8fff8f; }
+#game-hud .stealth .searching { color: #ffb347; font-weight: bold; }
+#game-hud .stealth .exposed { color: #ffd98a; }
+
+/* Números de daño */
+#damage-text { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }
+#damage-text .dmg {
+  position: absolute; left: 0; top: 0; font: bold 15px system-ui, sans-serif; color: #f2f2f2;
+  text-shadow: 0 0 3px #000, 0 1px 2px #000; white-space: nowrap; will-change: transform;
+}
+#damage-text .dmg.kill { color: #ff8a6b; font-size: 17px; }
+#damage-text .dmg.crit { color: #ffd84a; font-size: 22px; }
+
+/* Fila de armas */
+#game-hud .slots { margin-top: 4px; display: flex; gap: 4px; font-size: 11px; }
+#game-hud .slots .slot { padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.08); color: #bbb; }
+#game-hud .slots .slot.on { background: #ffd25a; color: #111; font-weight: bold; }
+#game-hud .slots .slot.none { opacity: 0.25; }
+
+/* --- Indicadores junto a la mira y bajo el jugador (ui/gauges.ts) ---------------------------- */
+#gauges { position: fixed; inset: 0; pointer-events: none; z-index: 3; }
+#gauges .cursor-tag {
+  position: absolute; left: 0; top: 0; transform-origin: 0 0; white-space: nowrap;
+  font: bold 13px system-ui, sans-serif; color: #f2f2f2; text-shadow: 0 0 3px #000, 0 1px 2px #000;
+}
+#gauges .cursor-tag .name { font-size: 10px; letter-spacing: 1.5px; color: #cfd6dc; opacity: 0.85; }
+#gauges .cursor-tag .mag { font-size: 22px; }
+#gauges .cursor-tag .mag.low { color: #ffb347; }
+#gauges .cursor-tag .sub { font-size: 13px; color: #b9c0c6; }
+#gauges .cursor-tag .out { font-size: 15px; color: #ff5a4d; }
+#gauges .cursor-tag .reload { font-size: 12px; color: #ffd25a; letter-spacing: 1px; }
+#gauges .cursor-tag .rbar { width: 70px; height: 4px; margin-top: 3px; background: rgba(255,255,255,0.2); border-radius: 2px; overflow: hidden; }
+#gauges .cursor-tag .rfill { height: 100%; background: #ffd25a; }
+#gauges .cursor-tag .hint { font-size: 11px; color: #ffd25a; }
+#gauges .player-bars { position: absolute; left: 0; top: 0; width: 64px; transform-origin: 0 0; display: flex; flex-direction: column; gap: 2px; }
+#gauges .pbar { height: 4px; background: rgba(0, 0, 0, 0.55); border-radius: 2px; overflow: hidden; box-shadow: 0 0 2px #000; }
+#gauges .pfill { height: 100%; width: 100%; }
+#gauges .pfill.hp { background: #6fd36f; }
+#gauges .pfill.hp.low { background: #e04545; }
+#gauges .pfill.air { background: #8fd0ff; }
+#gauges .pfill.air.low { background: #b8873f; }
+#gauges .pfill.light { background: #f2d16b; }
+#gauges .pfill.light.low { background: #c77d2b; }
+#gauges .pfill.light.off { opacity: 0.35; }
+
+/* En pantallas grandes, el resto del HUD crece con --ui (lo fija main.ts según la altura). */
+#hud, #minimap, #game-hud .panel, #game-hud .messages, #game-hud .prompt, #game-hud .stealth { zoom: var(--ui, 1); }
