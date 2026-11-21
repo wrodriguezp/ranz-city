@@ -130,6 +130,7 @@ export function updateHazards(state: GameState, rt: ZombieRuntime, dt: number): 
   // 2. Zombies ardiendo: pierden vida y contagian a los que tienen pegados.
   for (let i = 0; i < state.zombies.length; i++) {
     const z = state.zombies[i];
+    if (z.blazing) z.burn = Math.max(z.burn, 5);
     if (z.burn <= 0 || z.hp <= 0) continue;
     z.burn -= dt;
     // Cada uno arde en su propio tic (según su id) para repartir el costo.

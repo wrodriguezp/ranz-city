@@ -169,6 +169,8 @@ export class HazardsView {
         const z = burning[Math.floor(Math.random() * burning.length)];
         this.effects.ember(z.x, z.y, 0.6 + Math.random() * 0.9);
       }
+      // Los que arden siempre echan más chispas: una antorcha que corre.
+      for (const z of burning) if (z.blazing && Math.random() < 0.5) this.effects.ember(z.x, z.y, z.air + 0.4 + Math.random() * 1.2);
     }
   }
 

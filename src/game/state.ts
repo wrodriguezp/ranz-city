@@ -125,9 +125,13 @@ export interface Zombie {
      * Qué clase de vuelo es: 'slam' = el salto del tanque (aplasta al caer); 'thrown' = un zombie
      * que el tanque lanzó; 'held' = un zombie que el tanque tiene agarrado (by = id del tanque).
      */
-    kind?: 'slam' | 'thrown' | 'held';
+    kind?: 'slam' | 'thrown' | 'held' | 'drop';
     by?: number;
   };
+  /** En llamas: un corredor que arde sin consumirse (inmune al fuego) y quema lo que toca. */
+  blazing?: boolean;
+  /** Parado en un techo a esta altura: espera a que pases cerca para saltarte encima. */
+  perch?: number;
   /** El tanque carga algo para tirarlo: un barril o un zombie (su id). Sin nada, es una roca. */
   carry?: 'barrel' | number;
   /** Segundos hasta que el tanque pueda volver a saltar. */
@@ -337,7 +341,7 @@ export interface GameState {
    * timer: segundos hasta el próximo gruñido; told: cuándo se avisó por última vez en pantalla.
    */
   /** told: último aviso de la alerta en cadena; acidTold: último aviso de "estás en el ácido". */
-  alert: { timer: number; told: number; acidTold: number };
+  alert: { timer: number; told: number; acidTold: number; roofTold: number };
   /** El último ruido fuerte (disparo, alarma, explosión): las hordas van ahí, no a ti. */
   lastNoise: { x: number; y: number; time: number };
   stats: GameStats;

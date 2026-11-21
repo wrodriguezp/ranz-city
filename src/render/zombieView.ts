@@ -208,7 +208,7 @@ export class ZombieView {
     this.quaternion.setFromAxisAngle(this.up, -z.facing);
     // Saltando una valla, agarrado o en el salto del tanque va derecho; solo da vueltas el que
     // sale volando (explosión, embestida) o el que lanzó el tanque.
-    if (z.air > 0 && (!z.vault || z.vault.kind === 'thrown')) {
+    if (z.air > 0 && z.perch === undefined && (!z.vault || z.vault.kind === 'thrown')) {
       // Volando: da vueltas de carnero (gira en torno a su eje lateral según la altura).
       this.tumble.setFromAxisAngle(this.side, z.air * 1.3 + z.id);
       this.quaternion.multiply(this.tumble);

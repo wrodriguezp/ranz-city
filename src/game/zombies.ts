@@ -25,6 +25,7 @@ import { Tile } from '../world/tileGrid';
 import { lightAt } from '../world/streetLights';
 import { WEATHER_EFFECTS } from '../world/weather';
 import { isSolid, moveCircle, unstuck } from './collision';
+import { addHazard } from './hazards';
 import { liftBarrel, queueBlast, tankSlam, throwAcid, throwBarrel, throwRock } from './explosives';
 import { flashlightPower } from './flashlight';
 import type { FlowField } from './flowField';
@@ -151,6 +152,18 @@ const LEAP_COOLDOWN = 7;
 const GRAB_REACH = 2.6;
 const GRAB_WINDUP = 0.85;
 const THROWN_ZOMBIE_DAMAGE = 25;
+
+// --- En llamas ---------------------------------------------------------------------------------
+/** Fracción de los corredores que arden. Se ven de lejos en la oscuridad: corren hacia ti. */
+const BLAZING_CHANCE = 0.18;
+/** Daño extra de fuego al golpearte, y el fuego que dejan al morir. */
+const BLAZING_HIT = 8;
+const BLAZING_DEATH_FIRE = 1.4;
+
+// --- En los techos -----------------------------------------------------------------------------
+/** A qué distancia te notan desde el techo (caminando / agachado). */
+const PERCH_NOTICE = 7.5;
+const PERCH_NOTICE_SNEAK = 3.5;
 const CHARGE_DAMAGE = 35;
 const CHARGE_STUN = 1.6;
 
@@ -312,8 +325,9 @@ export function createZombie(state: GameState, x: number, y: number, kind: Zombi
     airV: 0,
     ability: kind === 'tank' ? 4 : kind === 'spitter' ? 2 : kind === 'sleeper' ? randomRange(state, 0, 3) : 0,
     agitation: kind === 'sleeper' ? 0 : undefined,
-    limbs: 0,
+    blazing: kind === 'runner' && random(state) < BLAZING_CHANCE ? true : undefined,
     burn: 0,
+    limbs: 0,
   };
 }
 
@@ -395,6 +409,8 @@ export function damageZombie(
   options: DamageOptions = {},
 ): boolean {
   if (z.hp <= 0) return false;
+  // El que arde sin consumirse no se quema más.
+  if (options.burn && z.blazing) return false;
   // Un tanque aturdido recibe el doble: es la ventana para pelearlo.
   const amount = z.kind === 'tank' && z.mode === 'stunned' ? damage * 2 : damage;
   z.hp -= amount;
@@ -458,6 +474,8 @@ export function damageZombie(
     state.stats.kills++;
     // El hinchado revienta: la explosión sale un instante después (por la cola de explosiones).
     if (z.kind === 'bloater') queueBlast(state, z.x, z.y, 'bloater', 0.05);
+    // El que ardía deja el fuego en el suelo: matarlo encima tuyo también quema.
+    if (z.blazing) addHazard(state, 'fire', z.x, z.y, BLAZING_DEATH_FIRE, 3);
     state.corpses.push({ x: z.x, y: z.y, facing: z.facing, kind: z.kind });
     if (state.corpses.length > 300) state.corpses.shift();
     if (z.kind === 'tank') state.events.push({ type: 'message', text: '¡Cayó el tanque!', tone: 'good' });
@@ -526,6 +544,14 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
     z.hitFlash = Math.max(0, z.hitFlash - dt);
     z.stagger = Math.max(0, z.stagger - dt);
 
+    // --- En un techo: espera quieto y salta cuando pasas cerca ------------------------------
+    if (z.perch !== undefined) {
+      z.air = z.perch;
+      const d = Math.hypot(player.x - z.x, player.y - z.y);
+      if (d < (player.sneaking ? PERCH_NOTICE_SNEAK : PERCH_NOTICE) || z.hp < z.maxHp) jumpFromRoof(state, grid, z);
+      continue;
+    }
+
     // --- Saltando un obstáculo: sigue el arco y no hace nada más ---------------------------
     if (z.vault) {
       const v = z.vault;
@@ -547,7 +573,9 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
         const k = Math.min(1, v.t / v.dur);
         z.x = v.fx + (v.tx - v.fx) * k;
         z.y = v.fy + (v.ty - v.fy) * k;
-        z.air = (v.z0 ?? 0) * (1 - k) + Math.sin(k * Math.PI) * (v.h ?? VAULT_HEIGHT);
+        // La caída desde un techo acelera (k²); el resto es un arco parejo.
+        const fall = v.kind === 'drop' ? 1 - k * k : 1 - k;
+        z.air = (v.z0 ?? 0) * fall + Math.sin(k * Math.PI) * (v.h ?? VAULT_HEIGHT);
         if (k >= 1) {
           z.vault = undefined;
           z.air = 0;
@@ -557,6 +585,13 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
           z.y = fixed.y;
           if (v.kind === 'slam') landSlam(state, rt, z);
           else if (v.kind === 'thrown') landThrown(state, z, v.tx - v.fx, v.ty - v.fy);
+          else if (v.kind === 'drop') {
+            // Cae agachado y sale corriendo hacia ti.
+            z.stagger = Math.max(z.stagger, 0.35);
+            z.mode = 'chase';
+            z.lastSeenAt = state.time;
+            state.events.push({ type: 'sfx', name: 'bounce', x: z.x, y: z.y });
+          }
           else z.stagger = Math.max(z.stagger, 0.15);
         }
         continue;
@@ -809,6 +844,10 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
     ) {
       const oneArm = (z.limbs & (LIMB_ARM_L | LIMB_ARM_R)) !== 0;
       hurtPlayer(state, Math.round(STATS[z.kind].damage * (oneArm ? ONE_ARM_DAMAGE : 1)));
+      if (z.blazing) {
+        hurtPlayer(state, BLAZING_HIT);
+        state.events.push({ type: 'sfx', name: 'ignite', x: player.x, y: player.y });
+      }
       z.attackCooldown = STATS[z.kind].cooldown;
       z.mode = 'chase';
       z.lastSeenAt = state.time;
@@ -1202,6 +1241,39 @@ function landThrown(state: GameState, z: Zombie, dirX: number, dirY: number): vo
   damageZombie(state, z, 35, 0, 0, 0.9, { sever: 0.4 });
   z.mode = 'chase';
   z.lastSeenAt = state.time;
+}
+
+/**
+ * Salta del techo a la calle, del lado donde estás: avanza desde el borde hacia ti hasta
+ * encontrar piso libre (como mucho 5 tiles).
+ */
+function jumpFromRoof(state: GameState, grid: City['grid'], z: Zombie): void {
+  const player = state.player;
+  const dx = player.x - z.x;
+  const dy = player.y - z.y;
+  const d = Math.hypot(dx, dy) || 1;
+  let tx = z.x;
+  let ty = z.y;
+  let found = false;
+  for (let k = 0.5; k <= 5; k += 0.5) {
+    tx = z.x + (dx / d) * k;
+    ty = z.y + (dy / d) * k;
+    if (!isSolid(grid, Math.floor(tx), Math.floor(ty))) {
+      found = true;
+      break;
+    }
+  }
+  if (!found) return;
+  const fixed = unstuck(grid, tx, ty, z.radius);
+  const height = z.perch ?? 0;
+  z.perch = undefined;
+  z.facing = Math.atan2(dy, dx);
+  z.vault = { t: 0, dur: 0.4 + height * 0.06, fx: z.x, fy: z.y, tx: fixed.x, ty: fixed.y, h: 0.5, z0: height, kind: 'drop' };
+  state.events.push({ type: 'sfx', name: 'dash', x: z.x, y: z.y });
+  if (state.time - state.alert.roofTold > 25) {
+    state.alert.roofTold = state.time;
+    state.events.push({ type: 'message', text: '¡Saltan desde los techos!', tone: 'danger' });
+  }
 }
 
 /** Arranca el salto hacia donde vas a estar (si ahí no cabe, hacia donde estás). */

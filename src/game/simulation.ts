@@ -14,7 +14,7 @@ import { updatePickups } from './pickups';
 import { createWeapons, startingLoadout, updateCombat, type CombatIntent } from './combat';
 import { updateExplosives } from './explosives';
 import { updateHazards } from './hazards';
-import { BLOCK_SIZE, STREET_WIDTH, Tile } from '../world/tileGrid';
+import { BLOCK_SIZE, buildingHeight, STREET_WIDTH, Tile } from '../world/tileGrid';
 import { isSolid } from './collision';
 import { createFlashlight, updateFlashlight } from './flashlight';
 import { FlowField } from './flowField';
@@ -98,11 +98,12 @@ export function createGameState(city: City): GameState {
     hordeTimer: initialHordeTimer(),
     noiseHeat: 0,
     director: createDirector(),
-    alert: { timer: 0, told: -999, acidTold: -999 },
+    alert: { timer: 0, told: -999, acidTold: -999, roofTold: -999 },
     lastNoise: { x: city.spawn.x, y: city.spawn.y, time: -999 },
     stats: { kills: 0, shots: 0, hordes: 0 },
     events: [],
   };
+  addRooftopZombies(state, city);
   // Arma inicial al azar (ver startingLoadout).
   startingLoadout(state.weapon, random(state));
   applyBarrels(city, state.barrelsBlown);
@@ -171,6 +172,45 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
 export function applyBarrels(city: City, blown: readonly boolean[]): void {
   for (const barrel of city.barrels) {
     city.grid.tiles[barrel.y * city.grid.width + barrel.x] = blown[barrel.id] ? Tile.Sidewalk : Tile.Barrel;
+  }
+}
+
+/** Edificios bajos (hasta 3 pisos, casas incluidas): desde el borde del techo un zombie puede saltar a la calle. */
+const ROOF_MAX_HEIGHT = 9;
+const ROOF_CHANCE = 0.08;
+const ROOF_DANGER_CHANCE = 0.3;
+const ROOF_MAX = 45;
+/** Lejos del inicio: que el primero no te caiga encima apenas empiezas. */
+const ROOF_SAFE_START = 26;
+
+/**
+ * Zombies parados en el borde de algunos techos. Es estado dinámico (no viene de la seed del
+ * mundo, sino del azar de la partida), y hay más cerca de las salidas, donde sube el peligro.
+ */
+function addRooftopZombies(state: GameState, city: City): void {
+  let placed = 0;
+  for (const b of city.grid.buildings) {
+    if (placed >= ROOF_MAX) break;
+    if (b.style === 'tent' || b.style === 'hospital' || b.w < 3 || b.h < 3) continue;
+    const height = buildingHeight(b);
+    if (height > ROOF_MAX_HEIGHT) continue;
+    const cx = b.x + b.w / 2;
+    const cy = b.y + b.h / 2;
+    if (Math.hypot(cx - city.spawn.x, cy - city.spawn.y) < ROOF_SAFE_START) continue;
+    const danger = dangerAt(city.zones, cx, cy);
+    if (random(state) > ROOF_CHANCE + ROOF_DANGER_CHANCE * danger) continue;
+    // Un punto al azar del borde, medio tile hacia adentro, mirando hacia afuera.
+    const side = Math.floor(random(state) * 4);
+    const t = 0.15 + random(state) * 0.7;
+    const x = side < 2 ? b.x + t * b.w : side === 2 ? b.x + 0.5 : b.x + b.w - 0.5;
+    const y = side < 2 ? (side === 0 ? b.y + 0.5 : b.y + b.h - 0.5) : b.y + t * b.h;
+    const z = createZombie(state, x, y, random(state) < 0.25 ? 'runner' : 'walker');
+    z.perch = height;
+    z.air = height;
+    z.mode = 'idle';
+    z.facing = side === 0 ? -Math.PI / 2 : side === 1 ? Math.PI / 2 : side === 2 ? Math.PI : 0;
+    state.zombies.push(z);
+    placed++;
   }
 }
 
