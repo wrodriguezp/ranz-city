@@ -11,13 +11,15 @@
 
 import type { CityLayout } from './cityLayout';
 import type { Rng } from './rng';
-import { Tile, type TileGrid } from './tileGrid';
+import { isFloorTile, type TileGrid } from './tileGrid';
 import { dangerAt, edgeMidpoint, exitNodes, shortestPath, type ZoneMap } from './zones';
 
 export interface ZombieSpawn {
   x: number;
   y: number;
   kind: 'walker' | 'runner' | 'bloater' | 'screamer' | 'spitter' | 'tank';
+  /** Soldado del retén: con casco y chaleco, aguanta más del doble. */
+  armored?: boolean;
 }
 
 /**
@@ -68,8 +70,7 @@ export function planEncounters(
   const walkable = (x: number, y: number) => {
     // Margen de medio tile con el borde: fuera de la grilla todo es sólido.
     if (x < 0.5 || y < 0.5 || x > grid.width - 0.5 || y > grid.height - 0.5) return false;
-    const t = grid.tiles[Math.floor(y) * grid.width + Math.floor(x)];
-    return t === Tile.Street || t === Tile.Sidewalk || t === Tile.Plaza;
+    return isFloorTile(grid.tiles[Math.floor(y) * grid.width + Math.floor(x)]);
   };
 
   // 1. Zombies sueltos.
@@ -80,6 +81,14 @@ export function planEncounters(
       const danger = dangerAt(zones, x + 0.5, y + 0.5);
       const density = BASE_DENSITY + DANGER_DENSITY * danger;
       if (rng.chance(density)) zombies.push({ x: x + 0.5, y: y + 0.5, kind: commonKind(danger, rng) });
+    }
+  }
+
+  // 1b. Los que esperan dentro de los recintos (parque, retén, hospital...).
+  for (const block of grid.blocks) {
+    for (const z of block.spots.zombies) {
+      if (Math.hypot(z.x - spawn.x, z.y - spawn.y) < SAFE_RADIUS) continue;
+      zombies.push({ x: z.x, y: z.y, kind: z.kind, armored: z.armored });
     }
   }
 

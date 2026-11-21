@@ -215,6 +215,9 @@ export class ZombieView {
     } else if (z.kind === 'spitter') {
       // Verde ácido; se aclara justo después de escupir.
       this.color.setHex(z.stagger > 0 && z.ability > 3.5 ? 0xc8f060 : 0x5c9a52);
+    } else if (z.armored) {
+      // Soldado: verde oliva del uniforme.
+      this.color.setHex(0x4d5636);
     } else {
       // Cada zombie con un tono propio entre verde grisáceo y marrón, fijo por su id.
       const t = ((z.id * 0.618034) % 1 + 1) % 1;

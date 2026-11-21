@@ -12,12 +12,15 @@
 
 import { Tile, tileAt, type TileGrid } from '../world/tileGrid';
 
-/** Bloquea la VISTA: solo los edificios. Barricadas y autos son bajos y se ve por encima. */
+/**
+ * Bloquea la VISTA: edificios, árboles (la copa) y los muros altos de la obra.
+ * Barricadas, autos, cercas y sacos de arena son bajos y se ve por encima.
+ */
 export function blocksSight(tile: Tile | undefined): boolean {
-  return tile === undefined || tile === Tile.Building;
+  return tile === undefined || tile === Tile.Building || tile === Tile.Tree || tile === Tile.Wall;
 }
 
-/** Bloquea las BALAS: todo lo sólido. */
+/** Bloquea las BALAS: todo lo sólido menos las cercas (reja, seto) y el agua. */
 export function blocksBullets(tile: Tile | undefined): boolean {
   return (
     tile === undefined ||
@@ -25,7 +28,10 @@ export function blocksBullets(tile: Tile | undefined): boolean {
     tile === Tile.Barricade ||
     tile === Tile.Car ||
     tile === Tile.Crate ||
-    tile === Tile.Barrel
+    tile === Tile.Barrel ||
+    tile === Tile.Wall ||
+    tile === Tile.Tree ||
+    tile === Tile.Sandbag
   );
 }
 

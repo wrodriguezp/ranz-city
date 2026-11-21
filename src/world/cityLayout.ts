@@ -16,8 +16,25 @@ export interface Exit {
   distance: number;
 }
 
+/**
+ * Canal: una columna entera de manzanas convertida en agua. Los tramos horizontales que la
+ * cruzan son agua también, salvo 2 o 3 PUENTES. Como el inicio está a la izquierda y las salidas
+ * a la derecha, todo camino tiene que cruzar por un puente: son pasos obligados naturales.
+ */
+export interface Canal {
+  /** Columna de manzanas (bx) que ocupa el agua. */
+  bx: number;
+  /** Ids de los tramos que son puente (abiertos). */
+  bridges: number[];
+  /** Ids de los tramos que son agua (bloqueados en el grafo, pero no con barricada). */
+  water: number[];
+}
+
+export const CANAL_CHANCE = 0.5;
+
 export interface CityLayout {
   graph: CityGraph;
+  canal: Canal | null;
   startNode: number;
   exits: Exit[];
   /** Distancia en tramos desde el inicio hasta cada cruce (BFS final). */
@@ -53,6 +70,37 @@ export function generateLayout(rng: Rng, options: LayoutOptions): CityLayout {
   // y se tiene que poder llegar por cualquier lado.
   const protectedEdges = new Set(graph.blockEdges(plaza.bx, plaza.by).map((e) => e.id));
 
+  // 2b. Canal (la mitad de las ciudades). Usa su propio PRNG hijo para no cambiar el resto.
+  //     Va entre el inicio y la plaza, así el helicóptero nunca queda en el agua.
+  let canal: Canal | null = null;
+  const canalRng = rng.fork('canal');
+  if (canalRng.chance(CANAL_CHANCE) && plaza.bx >= 2) {
+    const bx = canalRng.int(1, Math.min(3, plaza.bx - 1));
+    // Filas de los puentes: separadas entre sí (nunca dos seguidas) y nunca en el borde.
+    const rows = canalRng.shuffle(Array.from({ length: n - 2 }, (_, i) => i + 1));
+    const bridgeRows: number[] = [];
+    const want = canalRng.int(2, 3);
+    for (const row of rows) {
+      if (bridgeRows.length >= want) break;
+      if (bridgeRows.some((r) => Math.abs(r - row) < 2)) continue;
+      bridgeRows.push(row);
+    }
+    const bridges: number[] = [];
+    const water: number[] = [];
+    for (let y = 0; y < n; y++) {
+      const edge = graph.edgeBetween(graph.nodeId(bx, y), graph.nodeId(bx + 1, y))!;
+      if (bridgeRows.includes(y)) {
+        bridges.push(edge.id);
+        // Los puentes no se cortan: el canal ya es bastante laberinto.
+        protectedEdges.add(edge.id);
+      } else {
+        water.push(edge.id);
+        graph.blocked[edge.id] = true;
+      }
+    }
+    canal = { bx, bridges, water };
+  }
+
   // 3. Cortar calles al azar sin romper la conectividad.
   //
   // Recorremos los tramos en orden aleatorio. Para cada uno: lo bloqueamos y corremos un BFS
@@ -65,7 +113,7 @@ export function generateLayout(rng: Rng, options: LayoutOptions): CityLayout {
   // Con 9×9 = 81 cruces y 144 tramos podríamos cortar hasta 64; el cutRatio decide cuántos
   // intentamos para que queden varias rutas posibles y no un único pasillo.
   const targetCuts = Math.floor(graph.edges.length * options.cutRatio);
-  const candidates = rng.shuffle(graph.edges.filter((e) => !protectedEdges.has(e.id)));
+  const candidates = rng.shuffle(graph.edges.filter((e) => !protectedEdges.has(e.id) && !graph.blocked[e.id]));
   let cutCount = 0;
 
   for (const edge of candidates) {
@@ -91,5 +139,5 @@ export function generateLayout(rng: Rng, options: LayoutOptions): CityLayout {
     { kind: 'road', node: roadSide, distance: distanceFromStart[roadSide] },
   ];
 
-  return { graph, startNode, exits, distanceFromStart, cutCount };
+  return { graph, canal, startNode, exits, distanceFromStart, cutCount };
 }

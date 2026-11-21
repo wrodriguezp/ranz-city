@@ -22,7 +22,7 @@
 // sale 0.12 s después) y la cola es serializable como el resto del estado dinámico.
 
 import { Tile } from '../world/tileGrid';
-import { isSolid } from './collision';
+import { solidHeight } from './collision';
 import { PLAYER_RADIUS } from './player';
 import { addHazard, addLure } from './hazards';
 import { THROWABLES, type BlastName, type GameState, type Inventory, type Projectile, type ThrowableId } from './state';
@@ -192,14 +192,14 @@ export function updateExplosives(state: GameState, rt: ZombieRuntime, dt: number
     // Movimiento por ejes separados: si el siguiente tile en X es sólido, rebota en X (y lo mismo
     // en Y). Es el mismo truco que la colisión del jugador, pero para un punto.
     const nx = p.x + p.vx * dt;
-    if (isSolid(grid, Math.floor(nx), Math.floor(p.y)) && p.z < 3) {
+    if (p.z < solidHeight(grid, Math.floor(nx), Math.floor(p.y))) {
       if (fragile) boom = true;
       p.vx *= -0.45;
     } else {
       p.x = nx;
     }
     const ny = p.y + p.vy * dt;
-    if (isSolid(grid, Math.floor(p.x), Math.floor(ny)) && p.z < 3) {
+    if (p.z < solidHeight(grid, Math.floor(p.x), Math.floor(ny))) {
       if (fragile) boom = true;
       p.vy *= -0.45;
     } else {

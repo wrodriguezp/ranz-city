@@ -11,7 +11,8 @@ import { SEARCH_RANGE, searchableNear } from '../game/loot';
 import type { GameState } from '../game/state';
 import type { Container } from '../world/props';
 
-const CAR_COLORS = [0x7a2e2e, 0x2e4a7a, 0x8a8a8a, 0x2f2f33, 0x6b6b3a, 0xcfcfcf];
+// Los dos últimos son la ambulancia (blanca) y el camión militar (oliva): ver CAR_AMBULANCE.
+const CAR_COLORS = [0x7a2e2e, 0x2e4a7a, 0x8a8a8a, 0x2f2f33, 0x6b6b3a, 0xcfcfcf, 0xe8e8e8, 0x3f4a2a];
 const BODY_COLORS = [0x4f5d6e, 0x6e5a4a, 0x4a6e52, 0x705070];
 const GLINT_DISTANCE = 16;
 /** Desde esta distancia aparece el anillo (tenue); al alcance de E, brillante. */
@@ -54,7 +55,8 @@ export class PropsView {
     const crateMesh = this.instanced(crateGeometry, this.material(new THREE.MeshStandardMaterial({ roughness: 0.85 })), crates.length);
     crates.forEach((c, i) => {
       crateMesh.setMatrixAt(i, this.compose(c.x + 0.5, 0.15, c.y + 0.5, c.angle));
-      crateMesh.setColorAt(i, new THREE.Color(c.variant === 1 ? 0x4b5a32 : 0x8a6a3e));
+      // Militar (oliva), médica (blanca) o común (madera).
+      crateMesh.setColorAt(i, new THREE.Color(c.variant === 1 ? 0x4b5a32 : c.variant === 2 ? 0xd8d8d8 : 0x8a6a3e));
     });
 
     // Cuerpos: una cápsula acostada.

@@ -34,6 +34,13 @@ const TILE_COLORS: Record<number, [number, number, number]> = {
   [Tile.Car]: [120, 70, 70],
   [Tile.Crate]: [150, 115, 60],
   [Tile.Barrel]: [200, 60, 40],
+  [Tile.Fence]: [110, 116, 124],
+  [Tile.Wall]: [120, 96, 60],
+  [Tile.Tree]: [34, 64, 32],
+  [Tile.Water]: [22, 52, 74],
+  [Tile.Grass]: [50, 74, 46],
+  [Tile.Lot]: [66, 68, 74],
+  [Tile.Sandbag]: [122, 110, 76],
 };
 
 export interface ExitMarker {

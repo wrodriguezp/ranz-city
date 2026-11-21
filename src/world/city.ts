@@ -7,11 +7,11 @@
 import { generateLayout, type CityLayout } from './cityLayout';
 import { planEncounters, type EncounterPlan } from './encounters';
 import { hashString, Rng } from './rng';
-import { buildTileGrid, nodeCenter, type TileGrid } from './tileGrid';
+import { BLOCK_SIZE, blockStart, buildTileGrid, nodeCenter, type TileGrid } from './tileGrid';
 import { planEvacuation, type EvacPoint } from './evacuation';
 import { placeBarrels, placeProps, type Barrel, type Container } from './props';
 import { placeStreetLights, type LightMap } from './streetLights';
-import { computeZones, type ZoneMap } from './zones';
+import { computeZones, dangerAt, type ZoneMap } from './zones';
 
 export interface City {
   /** La seed tal como la escribió el jugador (texto). */
@@ -49,12 +49,16 @@ export function generateCity(seedText: string): City {
     nodesPerSide: CITY_NODES_PER_SIDE,
     cutRatio: CITY_CUT_RATIO,
   });
-  const grid = buildTileGrid(layout, rng.fork('tiles'));
+  // Las zonas solo dependen del grafo: se calculan antes, así el tipo de cada manzana puede
+  // depender del peligro (el retén militar va donde más peligro hay).
+  const zones = computeZones(layout);
+  const grid = buildTileGrid(layout, rng.fork('tiles'), (bx, by) =>
+    dangerAt(zones, blockStart(bx) + BLOCK_SIZE / 2, blockStart(by) + BLOCK_SIZE / 2),
+  );
 
   const { graph, startNode } = layout;
   const spawn = { x: nodeCenter(graph.nodeX(startNode)), y: nodeCenter(graph.nodeY(startNode)) };
 
-  const zones = computeZones(layout);
   // Los props van antes que los zombies: estampan autos y cajas en la grilla, y así nadie
   // aparece adentro de un auto.
   const props = placeProps(grid, layout, zones, spawn, rng.fork('props'));

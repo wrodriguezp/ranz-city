@@ -99,6 +99,8 @@ export interface Zombie {
    */
   air: number;
   airV: number;
+  /** Soldado del retén militar (más vida; casco y chaleco al dibujarlo). */
+  armored?: boolean;
   /** Enfriamiento de la habilidad especial (grito, lanzamiento del tanque). */
   ability: number;
   /** Miembros perdidos (ver LIMB_*). */

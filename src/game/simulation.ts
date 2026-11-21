@@ -6,7 +6,7 @@
 
 import type { City } from '../world/city';
 import { dangerAt } from '../world/zones';
-import { moveCircle } from './collision';
+import { unstuck } from './collision';
 import { createEscape, updateEscape } from './escape';
 import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
@@ -54,6 +54,8 @@ const FLANK_EVERY = 12;
 const FLANK_LEAD = 2.5;
 /** De los zombies que empiezan parados en un cruce, esta fracción son acechadores. */
 const AMBUSH_CHANCE = 0.45;
+/** Vida extra de los soldados del retén (multiplicador). */
+const ARMOR_HP = 2.2;
 
 export function createRuntime(city: City): Runtime {
   return {
@@ -99,8 +101,12 @@ export function createGameState(city: City): GameState {
   applyBarrels(city, state.barrelsBlown);
   for (const spawn of city.encounters.zombies) {
     const z = createZombie(state, spawn.x, spawn.y, spawn.kind);
+    if (spawn.armored) {
+      z.armored = true;
+      z.hp = z.maxHp = Math.round(z.hp * ARMOR_HP);
+    }
     // Los grupos se reparten al azar: si alguno quedó rozando una pared, lo empujamos afuera.
-    const fixed = moveCircle(city.grid, z.x, z.y, z.radius, 0, 0);
+    const fixed = unstuck(city.grid, z.x, z.y, z.radius);
     z.x = z.prevX = z.homeX = fixed.x;
     z.y = z.prevY = z.homeY = fixed.y;
     // Acechadores: algunos comunes que arrancan en un cruce se quedan ahí, agazapados.

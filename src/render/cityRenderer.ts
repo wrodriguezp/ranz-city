@@ -12,7 +12,8 @@
 import * as THREE from 'three';
 import type { City } from '../world/city';
 import { Rng } from '../world/rng';
-import { FLOOR_HEIGHT, nodeCenter, SIDEWALK_WIDTH, type Rect } from '../world/tileGrid';
+import { buildingHeight, nodeCenter, SIDEWALK_WIDTH, type Building, type Rect } from '../world/tileGrid';
+import { buildBlocksView } from './blocksView';
 
 const COLORS = {
   ground: 0x2b2e34,
@@ -26,9 +27,11 @@ const COLORS = {
 };
 
 const BUILDING_PALETTE = [0x8a8f98, 0x9c8f80, 0x7d8a8c, 0xa39a8b, 0x6f7680, 0x8c7f75];
+/** Casas en colores pastel gastados; el hospital blanco; la tienda roja; las carpas oliva. */
+const HOUSE_PALETTE = [0xb9a98a, 0x9fb0a4, 0xc2a38f, 0xa7a2b8, 0xc9c0a0, 0x8fa3b5];
+const STYLE_COLOR: Record<string, number> = { hospital: 0xd5d9dc, shop: 0xa8443a, tent: 0x4b5a32 };
 
 const SIDEWALK_HEIGHT = 0.15;
-const BARRICADE_HEIGHT = 1.4;
 
 export interface CityView {
   root: THREE.Group;
@@ -41,6 +44,8 @@ export interface CityView {
    * toCamera: dirección (normalizada) desde la escena hacia la cámara. Sin argumentos, no oculta ninguno.
    */
   updateOcclusion(playerX?: number, playerY?: number, toCamera?: THREE.Vector3): void;
+  /** Animaciones del escenario (fogatas). */
+  update(time: number): void;
   dispose(): void;
 }
 
@@ -66,7 +71,7 @@ export function buildCityView(city: City): CityView {
   root.add(ground);
 
   // Veredas: una losa por manzana. Los edificios se apoyan encima y tapan el centro.
-  const sidewalks = instancedBoxes(unitBox, grid.blocks, () => SIDEWALK_HEIGHT, () => COLORS.sidewalk);
+  const sidewalks = instancedBoxes(unitBox, grid.blocks.filter((b) => b.kind !== 'canal'), () => SIDEWALK_HEIGHT, () => COLORS.sidewalk);
   sidewalks.receiveShadow = true;
   root.add(sidewalks);
 
@@ -78,8 +83,13 @@ export function buildCityView(city: City): CityView {
   const buildings = instancedBoxes(
     unitBox,
     grid.buildings,
-    (b) => b.floors * FLOOR_HEIGHT,
-    () => colorRng.pick(BUILDING_PALETTE),
+    (b: Building) => buildingHeight(b),
+    (b: Building) => {
+      // Se tira siempre del mismo PRNG (aunque no se use) para que los colores de los demás no cambien.
+      const common = colorRng.pick(BUILDING_PALETTE);
+      if (b.style === 'house') return colorRng.pick(HOUSE_PALETTE);
+      return b.style ? STYLE_COLOR[b.style] : common;
+    },
     BUILDING_INSET,
   );
   buildings.castShadow = true;
@@ -95,10 +105,9 @@ export function buildCityView(city: City): CityView {
   const occlusion = createBuildingOcclusion(city, buildings, unitBox);
   root.add(occlusion.ghosts);
 
-  // Barricadas.
-  const barricades = instancedBoxes(unitBox, grid.barricades, () => BARRICADE_HEIGHT, () => COLORS.barricade, 0.05);
-  barricades.castShadow = true;
-  root.add(barricades);
+  // Recintos, canal, árboles, decoración y barricadas (blocksView).
+  const blocksView = buildBlocksView(city);
+  root.add(blocksView.root);
 
   // Plaza y helipuerto.
   const plazaBlock = grid.blocks.find((b) => b.isPlaza);
@@ -142,6 +151,7 @@ export function buildCityView(city: City): CityView {
     graphOverlay,
     exitBeacons,
     updateOcclusion: occlusion.update,
+    update: blocksView.update,
     dispose() {
       // Three.js no libera memoria de la GPU solo: hay que liberar geometrías y materiales a mano.
       root.traverse((obj) => {
@@ -178,7 +188,7 @@ function createBuildingOcclusion(city: City, buildings: THREE.InstancedMesh, geo
     (b) =>
       new THREE.Box3(
         new THREE.Vector3(b.x + BUILDING_INSET, 0, b.y + BUILDING_INSET),
-        new THREE.Vector3(b.x + b.w - BUILDING_INSET, b.floors * FLOOR_HEIGHT, b.y + b.h - BUILDING_INSET),
+        new THREE.Vector3(b.x + b.w - BUILDING_INSET, buildingHeight(b), b.y + b.h - BUILDING_INSET),
       ),
   );
 

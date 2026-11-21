@@ -60,6 +60,7 @@ export function placeStreetLights(grid: TileGrid, layout: CityLayout, rng: Rng):
   const lamps: StreetLamp[] = [];
   const edge = (ax: number, ay: number, bx: number, by: number) => graph.edgeBetween(graph.nodeId(ax, ay), graph.nodeId(bx, by))!;
   for (const block of grid.blocks) {
+    if (block.kind === 'canal') continue; // sin vereda: el canal queda a oscuras
     const { bx, by } = block;
     const sides = [
       { e: edge(bx, by, bx + 1, by), along: 'x', fixed: block.y + 0.6, facing: -Math.PI / 2 },

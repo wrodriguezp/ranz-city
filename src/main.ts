@@ -333,6 +333,7 @@ function frame(now: number): void {
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
+    cityView?.update(now / 1000);
     // Los eventos de los pasos de este cuadro: efectos y mensajes, y después se descartan.
     const axes = gameCamera.screenAxesOnGround();
     const listener = { x, y, rightX: axes.rightX, rightY: axes.rightY };

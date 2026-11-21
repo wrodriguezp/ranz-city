@@ -9,6 +9,7 @@
 // la colisión, el campo de flujo de los zombies y las balas los respetan sin código extra.
 // Los cuerpos no: están en el suelo, se pasa por encima.
 
+import type { CrateTier } from './blocks';
 import type { CityLayout } from './cityLayout';
 import type { Rng } from './rng';
 import { BLOCK_SIZE, blockStart, nodeStart, STREET_WIDTH, Tile, type TileGrid } from './tileGrid';
@@ -54,9 +55,15 @@ export interface Container {
   loot: LootItem[];
   /** Autos: al revisarlo salta la alarma (mucho ruido). Riesgo/recompensa en chiquito. */
   alarm: boolean;
-  /** Índice de color, solo para dibujar. */
+  /** Índice de color, solo para dibujar (autos: CAR_AMBULANCE y CAR_MILITARY son especiales). */
   variant: number;
 }
+
+/** Variantes especiales de auto (fuera de la paleta común). */
+export const CAR_AMBULANCE = 6;
+export const CAR_MILITARY = 7;
+/** Alarmas en los estacionamientos: más autos, más tentación, más ruido. */
+const PARKING_ALARM_CHANCE = 0.45;
 
 const CAR_CHANCE = 0.4;
 const BODY_CHANCE = 0.35;
@@ -173,6 +180,38 @@ export function placeProps(
     }
   }
 
+  // 2b. Lo que piden los recintos: autos, cajas especiales y cuerpos.
+  for (const block of grid.blocks) {
+    const { spots } = block;
+    for (const car of spots.cars) {
+      stamp(car.x, car.y, car.w, car.h, Tile.Car);
+      const angle = (car.w >= car.h ? 0 : Math.PI / 2) + (rng.chance(0.5) ? Math.PI : 0);
+      const danger = dangerAt(zones, car.x + car.w / 2, car.y + car.h / 2);
+      const base = { kind: 'car' as const, x: car.x, y: car.y, w: car.w, h: car.h, angle };
+      if (car.style === 'ambulance') {
+        add({ ...base, alarm: false, variant: CAR_AMBULANCE }, [
+          { type: 'medkit', amount: 2 },
+          { type: 'battery', amount: 1 },
+        ]);
+      } else if (car.style === 'military') {
+        add({ ...base, alarm: false, variant: CAR_MILITARY }, tierLoot('military', danger, lootRng));
+      } else {
+        add({ ...base, alarm: rng.chance(PARKING_ALARM_CHANCE), variant: rng.int(0, 5) });
+      }
+    }
+    for (const c of spots.crates) {
+      stamp(c.x, c.y, 1, 1, Tile.Crate);
+      const danger = dangerAt(zones, c.x + 0.5, c.y + 0.5);
+      const variant = c.tier === 'military' ? 1 : c.tier === 'medical' ? 2 : 0;
+      const guaranteed = c.tier === 'normal' ? undefined : tierLoot(c.tier, danger, lootRng);
+      add({ kind: 'crate', x: c.x, y: c.y, w: 1, h: 1, angle: rng.float() * 0.4 - 0.2, alarm: false, variant }, guaranteed);
+    }
+    for (const b of spots.bodies) {
+      if (nearSpawn(b.x, b.y)) continue;
+      add({ kind: 'body', x: b.x - 0.5, y: b.y - 0.5, w: 1, h: 1, angle: rng.float() * Math.PI * 2, alarm: false, variant: rng.int(0, 3) });
+    }
+  }
+
   // 3. Herramientas de arranque: entre los contenedores más cercanos al inicio, uno tiene una
   // escopeta y otro granadas. Sin esto, la primera horda se pelea solo con bate y pistola.
   const byDistance = containers
@@ -191,6 +230,12 @@ export function placeProps(
 export function placeBarrels(grid: TileGrid, zones: ZoneMap, spawn: { x: number; y: number }, rng: Rng): Barrel[] {
   const barrels: Barrel[] = [];
   for (const block of grid.blocks) {
+    // Los surtidores de la gasolinera son barriles: una chispa y vuela la cuadra.
+    for (const b of block.spots.barrels) {
+      if (grid.tiles[b.y * grid.width + b.x] !== Tile.Lot) continue;
+      grid.tiles[b.y * grid.width + b.x] = Tile.Barrel;
+      barrels.push({ id: barrels.length, x: b.x, y: b.y });
+    }
     if (block.isPlaza) continue;
     const danger = dangerAt(zones, block.x + BLOCK_SIZE / 2, block.y + BLOCK_SIZE / 2);
     const count = rng.int(0, BARRELS_PER_BLOCK_MAX) + (rng.chance(danger) ? 1 : 0);
@@ -249,6 +294,27 @@ function rollLoot(kind: ContainerKind, danger: number, rng: Rng): LootItem[] {
     items.push({ type: s < 0.34 ? 'minigun' : s < 0.67 ? 'flamer' : 'rocket', amount: 1 });
   }
   return mergeLoot(items);
+}
+
+/** Cajas especiales: el retén (armas y munición) y el hospital (botiquines). */
+function tierLoot(tier: Exclude<CrateTier, 'normal'>, danger: number, rng: Rng): LootItem[] {
+  if (tier === 'medical') {
+    const items: LootItem[] = [{ type: 'medkit', amount: rng.int(2, 3) }];
+    if (rng.chance(0.6)) items.push({ type: 'battery', amount: 1 });
+    return items;
+  }
+  const items: LootItem[] = [
+    { type: 'ammo', amount: rng.int(18, 30) },
+    { type: 'shells', amount: rng.int(5, 10) },
+  ];
+  if (rng.chance(0.7)) items.push({ type: 'grenade', amount: rng.int(1, 2) });
+  if (rng.chance(0.35)) items.push({ type: 'flare', amount: 1 });
+  if (rng.chance(0.3)) items.push({ type: rng.chance(0.5) ? 'shotgun' : 'smg', amount: 1 });
+  if (rng.chance(0.05 + 0.08 * danger)) {
+    const s = rng.float();
+    items.push({ type: s < 0.34 ? 'minigun' : s < 0.67 ? 'flamer' : 'rocket', amount: 1 });
+  }
+  return items;
 }
 
 /** Junta lo repetido: "18 balas" en vez de "10 balas, 8 balas". */

@@ -19,8 +19,75 @@ export function isSolid(grid: TileGrid, tx: number, ty: number): boolean {
     tile === Tile.Barricade ||
     tile === Tile.Car ||
     tile === Tile.Crate ||
-    tile === Tile.Barrel
+    tile === Tile.Barrel ||
+    tile === Tile.Fence ||
+    tile === Tile.Wall ||
+    tile === Tile.Tree ||
+    tile === Tile.Water ||
+    tile === Tile.Sandbag
   );
+}
+
+/**
+ * Hasta qué altura es sólido un tile (en tiles), para lo que vuela: una granada pasa por encima de
+ * una cerca o de un auto, pero no de un edificio. El agua no frena nada en el aire.
+ */
+export function solidHeight(grid: TileGrid, tx: number, ty: number): number {
+  const tile = tileAt(grid, tx, ty);
+  switch (tile) {
+    case undefined:
+    case Tile.Building:
+      return 99;
+    case Tile.Tree:
+      return 3.5;
+    case Tile.Wall:
+      return 2.6;
+    case Tile.Barricade:
+    case Tile.Car:
+      return 1.4;
+    case Tile.Fence:
+      return 1.3;
+    case Tile.Crate:
+    case Tile.Barrel:
+      return 1;
+    case Tile.Sandbag:
+      return 0.9;
+    default:
+      return 0;
+  }
+}
+
+/** ¿El círculo pisa algún tile sólido? */
+export function overlapsSolid(grid: TileGrid, x: number, y: number, r: number): boolean {
+  for (let ty = Math.floor(y - r); ty <= Math.floor(y + r); ty++)
+    for (let tx = Math.floor(x - r); tx <= Math.floor(x + r); tx++) {
+      if (!isSolid(grid, tx, ty)) continue;
+      const cx = Math.max(tx, Math.min(x, tx + 1));
+      const cy = Math.max(ty, Math.min(y, ty + 1));
+      if ((x - cx) ** 2 + (y - cy) ** 2 < r * r - 1e-6) return true;
+    }
+  return false;
+}
+
+/**
+ * Saca un círculo de las paredes al aparecer. Primero el empuje normal; si quedó encajado en un
+ * hueco más angosto que su diámetro (un hinchado entre dos cajas, por ejemplo), empujar hacia un
+ * lado lo mete en el otro, así que buscamos el centro de tile libre más cercano, en anillos.
+ */
+export function unstuck(grid: TileGrid, x: number, y: number, r: number): { x: number; y: number } {
+  const pushed = moveCircle(grid, x, y, r, 0, 0);
+  if (!overlapsSolid(grid, pushed.x, pushed.y, r)) return pushed;
+  const tx = Math.floor(x);
+  const ty = Math.floor(y);
+  for (let ring = 1; ring <= 4; ring++)
+    for (let dy = -ring; dy <= ring; dy++)
+      for (let dx = -ring; dx <= ring; dx++) {
+        if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+        const cx = tx + dx + 0.5;
+        const cy = ty + dy + 0.5;
+        if (!overlapsSolid(grid, cx, cy, r)) return { x: cx, y: cy };
+      }
+  return pushed;
 }
 
 /** Mueve un círculo (x, y, radio r) en (dx, dy) respetando los tiles sólidos. */
