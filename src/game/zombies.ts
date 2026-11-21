@@ -123,7 +123,17 @@ const CHARGE_STUN = 1.6;
 export const MAX_ZOMBIES = 450;
 const HORDE_FIRST = 90;
 const HORDE_INTERVAL = 100;
-const HORDE_HEAT_LIMIT = 18;
+const HORDE_HEAT_LIMIT = 22;
+/** Después de una horda, segundos en los que el ruido no trae otra. */
+const HORDE_RELAX = 50;
+/** Si despejas una horda (matas casi todos), el director te da este respiro extra. */
+const CLEARED_RELAX = 40;
+/** Zombies de horda que tiene la ciudad en total (las oleadas de la defensa final no cuentan). */
+const HORDE_RESERVE = 220;
+
+export function createDirector(): GameState['director'] {
+  return { relaxUntil: 0, reserve: HORDE_RESERVE, horde: 0, hordeSize: 0, warnedEmpty: false };
+}
 const HORDE_CHASE_TIME = 75;
 
 export function createZombie(state: GameState, x: number, y: number, kind: ZombieKind): Zombie {
@@ -900,12 +910,37 @@ export function updateHordes(state: GameState, rt: ZombieRuntime, dt: number, da
   state.noiseHeat = Math.max(0, state.noiseHeat - 0.25 * dt);
   // Durante la defensa final no hay hordas al azar: ya vienen las oleadas.
   if (state.escape.defense) return;
+  const director = state.director;
 
-  const byNoise = state.noiseHeat >= HORDE_HEAT_LIMIT;
+  // ¿Despejaste la última horda? Quedan menos de un 15%: el director te da un respiro.
+  if (director.hordeSize > 0 && state.time > 0) {
+    let alive = 0;
+    for (const z of state.zombies) if (z.horde === director.horde) alive++;
+    if (alive <= Math.floor(director.hordeSize * 0.15)) {
+      director.hordeSize = 0;
+      director.relaxUntil = Math.max(director.relaxUntil, state.time + CLEARED_RELAX);
+      state.hordeTimer = Math.max(state.hordeTimer, CLEARED_RELAX);
+      state.noiseHeat = 0;
+      state.events.push({ type: 'message', text: 'Despejaste la horda. Respira.', tone: 'good' });
+    }
+  }
+
+  // El ruido trae hordas, pero no una detrás de otra: después de cada una hay un respiro.
+  const relaxed = state.time < director.relaxUntil;
+  const byNoise = state.noiseHeat >= HORDE_HEAT_LIMIT && !relaxed;
+  if (relaxed) state.noiseHeat = Math.min(state.noiseHeat, HORDE_HEAT_LIMIT * 0.6);
   if (state.hordeTimer > 0 && !byNoise) return;
   state.hordeTimer = HORDE_INTERVAL * (1 - 0.45 * danger);
   state.noiseHeat = 0;
-  const size = Math.round(14 + 14 * danger);
+  // La ciudad es finita: si ya no quedan, no vienen más hordas (siguen los que deambulan).
+  const size = Math.min(director.reserve, Math.round(14 + 14 * danger));
+  if (size < 6) {
+    if (!director.warnedEmpty) {
+      director.warnedEmpty = true;
+      state.events.push({ type: 'message', text: 'La ciudad está más callada: ya no quedan hordas cerca', tone: 'good' });
+    }
+    return;
+  }
   if (spawnHorde(state, rt, size)) {
     state.events.push({ type: 'sfx', name: 'horde', x: state.player.x, y: state.player.y });
     state.events.push({
@@ -954,10 +989,16 @@ export function spawnHorde(state: GameState, rt: ZombieRuntime, size: number): b
       z.targetX = state.lastNoise.x + randomRange(state, -3, 3);
       z.targetY = state.lastNoise.y + randomRange(state, -3, 3);
       z.hordeUntil = state.time + HORDE_CHASE_TIME;
+      z.horde = state.director.horde + 1;
       state.zombies.push(z);
       placed++;
     }
     state.stats.hordes++;
+    const director = state.director;
+    director.horde++;
+    director.hordeSize = placed;
+    director.reserve -= placed;
+    director.relaxUntil = state.time + HORDE_RELAX;
     return placed > 0;
   }
   return false;

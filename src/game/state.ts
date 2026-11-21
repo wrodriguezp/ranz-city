@@ -108,6 +108,8 @@ export interface Zombie {
   airV: number;
   /** Viene en una oleada de la defensa final (no suelta loot: para eso está la caja de munición). */
   wave?: boolean;
+  /** Número de la horda en la que vino (0 = no vino en una horda). */
+  horde?: number;
   /** Soldado del retén militar (más vida; casco y chaleco al dibujarlo). */
   armored?: boolean;
   /** Enfriamiento de la habilidad especial (grito, lanzamiento del tanque). */
@@ -287,6 +289,14 @@ export interface GameState {
   hordeTimer: number;
   /** "Calor" del ruido: cada disparo suma; si se acumula mucho, llega una horda antes. */
   noiseHeat: number;
+  /**
+   * El director de las hordas (como el de L4D2): reparte tensión y respiro.
+   * relaxUntil: hasta cuándo el ruido no trae hordas (después de una, toca respirar).
+   * reserve: cuántos zombies de horda le quedan a la ciudad (es finita: las hordas se acaban).
+   * horde: número de la última horda; sus zombies llevan ese número en Zombie.horde.
+   * hordeSize: cuántos trajo (para saber si la despejaste).
+   */
+  director: { relaxUntil: number; reserve: number; horde: number; hordeSize: number; warnedEmpty: boolean };
   /**
    * Alerta en cadena: si 3 o más zombies te persiguen, gruñen y ese ruido llama a los de alrededor.
    * timer: segundos hasta el próximo gruñido; told: cuándo se avisó por última vez en pantalla.

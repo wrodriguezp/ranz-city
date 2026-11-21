@@ -56,11 +56,11 @@ interface GunSpec {
 }
 
 export const GUNS: Record<GunId, GunSpec> = {
-  pistol: { name: 'PISTOLA', ammo: 'light', mag: 12, cooldown: 0.22, damage: 60, pellets: 1, spread: 0.035, range: 32, noise: 26, reload: 1.4, knock: 6, auto: false },
-  shotgun: { name: 'ESCOPETA', ammo: 'shells', mag: 6, cooldown: 0.8, damage: 30, pellets: 9, spread: 0.2, range: 15, noise: 34, reload: 2.2, knock: 6, auto: false },
-  smg: { name: 'SUBFUSIL', ammo: 'light', mag: 30, cooldown: 0.075, damage: 30, pellets: 1, spread: 0.09, range: 26, noise: 30, reload: 1.9, knock: 2.5, auto: true },
+  pistol: { name: 'PISTOLA', ammo: 'light', mag: 12, cooldown: 0.22, damage: 60, pellets: 1, spread: 0.035, range: 32, noise: 20, reload: 1.4, knock: 6, auto: false },
+  shotgun: { name: 'ESCOPETA', ammo: 'shells', mag: 6, cooldown: 0.8, damage: 30, pellets: 9, spread: 0.2, range: 15, noise: 28, reload: 2.2, knock: 6, auto: false },
+  smg: { name: 'SUBFUSIL', ammo: 'light', mag: 30, cooldown: 0.075, damage: 30, pellets: 1, spread: 0.09, range: 26, noise: 24, reload: 1.9, knock: 2.5, auto: true },
   // La minigun no se recarga: 180 balas a 22 por segundo, y te frena mientras disparas.
-  minigun: { name: 'MINIGUN', ammo: null, mag: 180, cooldown: 0.045, damage: 32, pellets: 1, spread: 0.11, range: 30, noise: 44, reload: 0, knock: 3.5, auto: true },
+  minigun: { name: 'MINIGUN', ammo: null, mag: 180, cooldown: 0.045, damage: 32, pellets: 1, spread: 0.11, range: 30, noise: 36, reload: 0, knock: 3.5, auto: true },
   // Lanzallamas: corto alcance, no es un rayo sino un cono; prende fuego a lo que toca.
   flamer: { name: 'LANZALLAMAS', ammo: null, mag: 160, cooldown: 0.05, damage: 4, pellets: 0, spread: 0.32, range: 7, noise: 14, reload: 0, knock: 0.6, auto: true },
   // Lanzacohetes: un proyectil que explota al tocar algo (ver explosives.ts).
@@ -118,6 +118,8 @@ export interface WeaponState {
   durability: number;
   /** Disparos del lanzallamas (para dejar fuego en el suelo cada tanto). */
   flameCount: number;
+  /** ¿La pistola tiene silenciador? (loot raro; los jefes lo sueltan). */
+  suppressor: boolean;
 }
 
 export interface CombatIntent {
@@ -138,6 +140,13 @@ export interface CombatIntent {
   aimY: number;
 }
 
+/**
+ * Cuánto "calor" (ver updateHordes) suma cada disparo. Las automáticas suman poco por bala, pero
+ * disparan muchas; la escopeta y el cohete, mucho. Con 22 de límite y enfriándose 0,25 por segundo,
+ * se puede pelear un rato con la pistola sin que llegue una horda.
+ */
+const HEAT_PER_SHOT: Record<GunId, number> = { pistol: 0.7, shotgun: 1.1, smg: 0.35, minigun: 0.35, flamer: 0.1, rocket: 1.1 };
+const SUPPRESSED_NOISE = 7;
 /** Un zombie pegado al jugador cuenta aunque quede apenas fuera del arco. */
 const MELEE_ARC_SLACK = 0.5;
 const MELEE_NOISE = 6;
@@ -163,6 +172,7 @@ export function createWeapons(): WeaponState {
     melee: 'bat',
     durability: -1,
     flameCount: 0,
+    suppressor: false,
   };
 }
 
@@ -290,8 +300,10 @@ function shoot(state: GameState, rt: ZombieRuntime, id: GunId): void {
     }
   }
 
-  makeNoise(state, player.x, player.y, gun.noise, rt);
-  state.noiseHeat += id === 'smg' || id === 'minigun' ? 0.5 : id === 'shotgun' || id === 'rocket' ? 1.5 : id === 'flamer' ? 0.1 : 1;
+  // Con silenciador, la pistola se oye apenas a unos metros: se puede pelear sin llamar a todos.
+  const quiet = id === 'pistol' && state.weapon.suppressor;
+  makeNoise(state, player.x, player.y, quiet ? SUPPRESSED_NOISE : gun.noise, rt);
+  state.noiseHeat += quiet ? 0.15 : HEAT_PER_SHOT[id];
 
   // Una especial vacía se tira: no hay de dónde recargarla.
   if (isSpecial(id) && weapon.mags[id] <= 0) {

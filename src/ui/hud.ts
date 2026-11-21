@@ -132,7 +132,7 @@ export class Hud {
       const gun = GUNS[current];
       const ammoType = gun.ammo;
       main = ammoType
-        ? `<b>${gun.name}</b> ${w.reloadTimer > 0 ? '<i>recargando…</i>' : `${w.mags[current]}/${gun.mag}`} <span class="dim">· reserva ${w.ammo[ammoType]}</span>`
+        ? `<b>${gun.name}</b>${current === 'pistol' && w.suppressor ? ' <span class="dim">(silenciada)</span>' : ''} ${w.reloadTimer > 0 ? '<i>recargando…</i>' : `${w.mags[current]}/${gun.mag}`} <span class="dim">· reserva ${w.ammo[ammoType]}</span>`
         : `<b>${gun.name}</b> ${w.mags[current]}/${gun.mag} <span class="dim">· se tira al vaciarse</span>`;
     } else {
       main = `<b>${melee.name}</b>${wear}`;

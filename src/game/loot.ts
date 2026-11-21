@@ -161,6 +161,14 @@ export function updateLoot(state: GameState, rt: ZombieRuntime, holding: boolean
 
 function give(state: GameState, item: LootItem): string {
   switch (item.type) {
+    case 'suppressor':
+      if (state.weapon.suppressor) {
+        state.weapon.ammo.light += 12;
+        return 'otro silenciador (+12 balas)';
+      }
+      state.weapon.suppressor = true;
+      state.events.push({ type: 'sfx', name: 'weapon', x: state.player.x, y: state.player.y });
+      return 'un SILENCIADOR para la pistola';
     case 'ammo':
       state.weapon.ammo.light += item.amount;
       return `${item.amount} balas`;

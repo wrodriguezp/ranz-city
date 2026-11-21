@@ -8,6 +8,7 @@ import type { City } from '../world/city';
 import { dangerAt } from '../world/zones';
 import { unstuck } from './collision';
 import { createEscape, radioExitAt, updateEscape } from './escape';
+import { createDirector } from './zombies';
 import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { updateExplosives } from './explosives';
@@ -94,6 +95,7 @@ export function createGameState(city: City): GameState {
     corpses: [],
     hordeTimer: initialHordeTimer(),
     noiseHeat: 0,
+    director: createDirector(),
     alert: { timer: 0, told: -999 },
     lastNoise: { x: city.spawn.x, y: city.spawn.y, time: -999 },
     stats: { kills: 0, shots: 0, hordes: 0 },

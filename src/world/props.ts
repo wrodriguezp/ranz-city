@@ -17,6 +17,7 @@ import { dangerAt, type ZoneMap } from './zones';
 
 /** ammo = balas livianas (pistola y subfusil); shells = cartuchos de escopeta. */
 export type LootType =
+  | 'suppressor'
   | 'ammo'
   | 'shells'
   | 'grenade'
@@ -294,6 +295,8 @@ function rollLoot(kind: ContainerKind, danger: number, rng: Rng): LootItem[] {
   // Una radio (en cajas) o una bengala (en zonas peligrosas): herramientas, no armas.
   if (kind === 'crate' && rng.chance(0.07)) items.push({ type: 'radio', amount: 1 });
   if (rng.chance(0.02 + 0.05 * danger)) items.push({ type: 'flare', amount: 1 });
+  // Un silenciador para la pistola: raro, y lo que más cambia cómo juegas (ver combat.ts).
+  if (rng.chance(0.012 + 0.02 * danger)) items.push({ type: 'suppressor', amount: 1 });
   // Muy de vez en cuando, un arma especial en una caja de una zona peligrosa.
   if (kind === 'crate' && rng.chance(0.03 * danger)) {
     const s = rng.float();
