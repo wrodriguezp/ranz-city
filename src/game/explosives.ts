@@ -49,6 +49,8 @@ const BLASTS: Record<BlastName, BlastSpec> = {
   bloater: { radius: 3.4, damage: 110, playerFactor: 0.3, noise: 20 },
   rock: { radius: 1.8, damage: 60, playerFactor: 0.45, noise: 12 },
   rocket: { radius: 5.5, damage: 320, playerFactor: 0.35, noise: 48 },
+  // El tanque cae de un salto: no quema, pero manda a volar todo lo que hay alrededor.
+  slam: { radius: 4.5, damage: 90, playerFactor: 0.4, noise: 14 },
 };
 
 /** Qué campo del inventario cuenta cada lanzable (para no repetir el switch). */
@@ -174,6 +176,39 @@ export function throwRock(state: GameState, fromX: number, fromY: number, toX: n
   state.events.push({ type: 'sfx', name: 'throw', x: fromX, y: fromY });
 }
 
+/** El tanque cae de su salto: onda que lastima y lanza a todo alrededor (ver BLASTS.slam). */
+export function tankSlam(state: GameState, rt: ZombieRuntime, x: number, y: number): void {
+  explode(state, rt, x, y, 'slam');
+}
+
+/**
+ * El tanque arranca un barril del suelo para tirártelo: deja de estar en la calle (igual que si
+ * hubiera explotado, se reconstruye desde state.barrelsBlown) pero todavía no explota.
+ */
+export function liftBarrel(state: GameState, rt: ZombieRuntime, id: number): void {
+  if (state.barrelsBlown[id]) return;
+  const barrel = rt.city.barrels[id];
+  state.barrelsBlown[id] = true;
+  const index = barrel.y * rt.city.grid.width + barrel.x;
+  rt.city.grid.tiles[index] = Tile.Sidewalk;
+  rt.field.setWalkable(index, true);
+  rt.noiseField.setWalkable(index, true);
+  state.events.push({ type: 'barrel', id });
+}
+
+/** Mismo arco que la roca, pero revienta como un barril. */
+export function throwBarrel(state: GameState, fromX: number, fromY: number, toX: number, toY: number): void {
+  const dx = toX - fromX;
+  const dy = toY - fromY;
+  const dist = Math.hypot(dx, dy) || 1;
+  const flight = 0.7 + dist * 0.04;
+  const z0 = 3.4;
+  const sx = fromX + (dx / dist) * 0.6;
+  const sy = fromY + (dy / dist) * 0.6;
+  addProjectile(state, 'barrel', sx, sy, z0, (toX - sx) / flight, (toY - sy) / flight, (GRAVITY * flight) / 2 - z0 / flight, 99, toX, toY);
+  state.events.push({ type: 'sfx', name: 'throw', x: fromX, y: fromY });
+}
+
 function addProjectile(state: GameState, kind: Projectile['kind'], x: number, y: number, z: number, vx: number, vy: number, vz: number, fuse: number, targetX = x, targetY = y): void {
   state.projectiles.push({ kind, targetX, targetY, x, y, z, vx, vy, vz, fuse, landed: false });
 }
@@ -185,7 +220,7 @@ export function updateExplosives(state: GameState, rt: ZombieRuntime, dt: number
     const p = state.projectiles[i];
     let boom = false;
     // "Frágiles": revientan al primer golpe contra lo que sea (no rebotan).
-    const fragile = p.kind === 'rock' || p.kind === 'molotov' || p.kind === 'acid' || p.kind === 'rocket';
+    const fragile = p.kind === 'rock' || p.kind === 'molotov' || p.kind === 'acid' || p.kind === 'rocket' || p.kind === 'barrel';
     if (p.kind !== 'rocket') p.vz -= GRAVITY * dt;
     p.z += p.vz * dt;
 
@@ -229,7 +264,7 @@ export function updateExplosives(state: GameState, rt: ZombieRuntime, dt: number
         p.vy *= 0.55;
       }
     }
-    if (p.kind !== 'rock' && p.kind !== 'acid' && p.kind !== 'molotov') {
+    if (p.kind !== 'rock' && p.kind !== 'acid' && p.kind !== 'molotov' && p.kind !== 'barrel') {
       p.fuse -= dt;
       if (p.fuse <= 0) boom = true;
     }
@@ -261,6 +296,10 @@ function land(state: GameState, rt: ZombieRuntime, p: Projectile): void {
     case 'rocket':
       explode(state, rt, p.x, p.y, p.kind);
       break;
+    case 'barrel':
+      // El barril que tiró el tanque revienta donde cae.
+      explode(state, rt, p.x, p.y, 'barrel');
+      break;
     case 'molotov':
       // La botella se rompe y la nafta encendida se desparrama.
       addHazard(state, 'fire', p.x, p.y, MOLOTOV_RADIUS, MOLOTOV_TIME);
@@ -283,7 +322,7 @@ function land(state: GameState, rt: ZombieRuntime, p: Projectile): void {
 }
 
 function hitsBody(state: GameState, p: Projectile): boolean {
-  const hitsPlayer = p.kind === 'rock' || p.kind === 'acid';
+  const hitsPlayer = p.kind === 'rock' || p.kind === 'acid' || p.kind === 'barrel';
   if (hitsPlayer && Math.hypot(state.player.x - p.x, state.player.y - p.y) < PLAYER_RADIUS + 0.3) return true;
   // El ácido del escupidor no choca con los suyos; los señuelos tampoco se frenan en nadie.
   if (p.kind === 'acid' || p.kind === 'flare' || p.kind === 'radio' || p.kind === 'firecracker') return false;
@@ -292,7 +331,7 @@ function hitsBody(state: GameState, p: Projectile): boolean {
   // Recorrido directo: hay muy pocos proyectiles a la vez, y la grilla espacial puede no estar
   // armada todavía en este punto del paso (se arma dentro de updateZombies).
   for (const z of state.zombies) {
-    if (z.hp > 0 && (z.kind !== 'tank' || p.kind !== 'rock') && Math.abs(z.x - p.x) < 1.2 && Math.abs(z.y - p.y) < 1.2) {
+    if (z.hp > 0 && (z.kind !== 'tank' || (p.kind !== 'rock' && p.kind !== 'barrel')) && Math.abs(z.x - p.x) < 1.2 && Math.abs(z.y - p.y) < 1.2) {
       if (Math.hypot(z.x - p.x, z.y - p.y) < z.radius + 0.15) return true;
     }
   }
@@ -325,10 +364,11 @@ function explode(state: GameState, rt: ZombieRuntime, x: number, y: number, kind
   // Primero el ruido (atrae a todos al estallido) y después el daño: a los que golpea de cerca
   // damageZombie los pone a perseguir, como corresponde.
   makeNoise(state, x, y, spec.noise, rt);
-  if (kind !== 'rock') state.noiseHeat += 2;
+  if (kind !== 'rock' && kind !== 'slam') state.noiseHeat += 2;
 
   for (const z of state.zombies) {
     if (z.hp <= 0) continue;
+    if (kind === 'slam' && z.kind === 'tank') continue; // el que cae no se lastima
     const dx = z.x - x;
     const dy = z.y - y;
     const d = Math.hypot(dx, dy);
@@ -337,7 +377,7 @@ function explode(state: GameState, rt: ZombieRuntime, x: number, y: number, kind
     const nx = d > 0.01 ? dx / d : Math.cos(z.id);
     const ny = d > 0.01 ? dy / d : Math.sin(z.id);
     // La roca del tanque no lastima a los suyos tanto: es para ti.
-    const damage = spec.damage * (0.3 + 0.7 * f) * (kind === 'rock' ? 0.5 : 1);
+    const damage = spec.damage * (0.3 + 0.7 * f) * (kind === 'rock' || kind === 'slam' ? 0.5 : 1);
     damageZombie(state, z, damage, 0, 0, 0.8, { gib: f > 0.35, sever: f > 0.1 ? 0.5 : 0 });
     launchZombie(z, nx * (5 + 13 * f), ny * (5 + 13 * f), 5 + 9 * f);
   }

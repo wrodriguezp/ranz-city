@@ -55,7 +55,7 @@ export const LIMB_LEGS = 4;
  */
 export type ZombieRole = 'chaser' | 'surround' | 'flanker' | 'ambusher';
 
-export type ZombieMode = 'idle' | 'wander' | 'investigate' | 'chase' | 'return' | 'charge' | 'stunned' | 'throw';
+export type ZombieMode = 'idle' | 'wander' | 'investigate' | 'chase' | 'return' | 'charge' | 'stunned' | 'throw' | 'leap';
 
 export interface Zombie {
   id: number;
@@ -111,7 +111,27 @@ export interface Zombie {
    * Saltando un obstáculo bajo (valla, barricada, auto): va de (fx, fy) a (tx, ty) en dur
    * segundos, por encima, sin colisión. t = segundos transcurridos.
    */
-  vault?: { t: number; dur: number; fx: number; fy: number; tx: number; ty: number };
+  vault?: {
+    t: number;
+    dur: number;
+    fx: number;
+    fy: number;
+    tx: number;
+    ty: number;
+    /** Altura del arco (por defecto la de saltar una valla) y altura de partida. */
+    h?: number;
+    z0?: number;
+    /**
+     * Qué clase de vuelo es: 'slam' = el salto del tanque (aplasta al caer); 'thrown' = un zombie
+     * que el tanque lanzó; 'held' = un zombie que el tanque tiene agarrado (by = id del tanque).
+     */
+    kind?: 'slam' | 'thrown' | 'held';
+    by?: number;
+  };
+  /** El tanque carga algo para tirarlo: un barril o un zombie (su id). Sin nada, es una roca. */
+  carry?: 'barrel' | number;
+  /** Segundos hasta que el tanque pueda volver a saltar. */
+  leapCd?: number;
   /** Viene en una oleada de la defensa final (no suelta loot: para eso está la caja de munición). */
   wave?: boolean;
   /** Número de la horda en la que vino (0 = no vino en una horda). */
@@ -190,8 +210,8 @@ export interface Projectile {
   landed: boolean;
 }
 
-export type ProjectileKind = 'grenade' | 'rock' | 'molotov' | 'firecracker' | 'radio' | 'flare' | 'acid' | 'rocket';
-export type BlastName = 'grenade' | 'barrel' | 'bloater' | 'rock' | 'rocket';
+export type ProjectileKind = 'grenade' | 'rock' | 'molotov' | 'firecracker' | 'radio' | 'flare' | 'acid' | 'rocket' | 'barrel';
+export type BlastName = 'grenade' | 'barrel' | 'bloater' | 'rock' | 'rocket' | 'slam';
 /** Lo que se lanza con G (T cambia cuál). */
 export type ThrowableId = 'grenade' | 'molotov' | 'firecracker' | 'radio' | 'flare';
 export const THROWABLES: ThrowableId[] = ['grenade', 'molotov', 'firecracker', 'radio', 'flare'];

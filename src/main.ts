@@ -407,7 +407,7 @@ function feel(events: readonly GameEvent[]): void {
         // Más fuerte mientras más cerca: una granada al lado sacude todo; una lejana, apenas.
         const d = Math.hypot(event.x - state.player.x, event.y - state.player.y);
         const near = Math.max(0, 1 - d / 30);
-        gameCamera.shake((event.kind === 'rock' ? 0.4 : event.kind === 'bloater' ? 0.45 : 0.9) * near);
+        gameCamera.shake((event.kind === 'rock' ? 0.4 : event.kind === 'bloater' ? 0.45 : event.kind === 'slam' ? 0.8 : 0.9) * near);
         hitstop = Math.max(hitstop, event.kind === 'rock' ? 0.03 : 0.07 * near);
         break;
       }

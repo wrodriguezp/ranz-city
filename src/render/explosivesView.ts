@@ -42,6 +42,8 @@ export class ExplosivesView {
   private readonly grenades: THREE.InstancedMesh;
   private readonly blinks: THREE.InstancedMesh;
   private readonly rocks: THREE.InstancedMesh;
+  /** Barriles en el aire (o en las manos del tanque). Los de la calle están en this.barrels. */
+  private readonly flyingBarrels: THREE.InstancedMesh;
   private readonly markers: THREE.InstancedMesh;
   private readonly matrix = new THREE.Matrix4();
   private readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
@@ -75,10 +77,13 @@ export class ExplosivesView {
     this.grenades.setColorAt(0, this.color.setHex(0xffffff));
     this.blinks.setColorAt(0, this.color.setHex(0xffffff));
     this.rocks = new THREE.InstancedMesh(new THREE.DodecahedronGeometry(0.45), new THREE.MeshStandardMaterial({ color: 0x5c5a55, roughness: 1 }), MAX_PROJECTILES);
-    for (const mesh of [this.grenades, this.blinks, this.rocks]) {
+    const flying = new THREE.CylinderGeometry(0.34, 0.34, 1.0, 14);
+    this.flyingBarrels = new THREE.InstancedMesh(flying, this.barrels.material, MAX_PROJECTILES);
+    for (const mesh of [this.grenades, this.blinks, this.rocks, this.flyingBarrels]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
     }
+    this.flyingBarrels.castShadow = true;
     this.rocks.castShadow = true;
     const ring = new THREE.RingGeometry(1.1, 1.45, 36);
     ring.rotateX(-Math.PI / 2);
@@ -90,7 +95,7 @@ export class ExplosivesView {
     this.markers.setColorAt(0, this.color.setHex(0xffffff));
     this.markers.count = 0;
     this.markers.frustumCulled = false;
-    this.root.add(this.barrels, this.bands, this.grenades, this.blinks, this.rocks, this.markers);
+    this.root.add(this.barrels, this.bands, this.grenades, this.blinks, this.rocks, this.flyingBarrels, this.markers);
   }
 
   update(state: GameState, time: number): void {
@@ -100,17 +105,34 @@ export class ExplosivesView {
     let rocks = 0;
     let blinks = 0;
     let markers = 0;
-    // Tanques cargando el tiro: la roca arriba de la cabeza, sube mientras carga.
+    let barrels = 0;
+    const marker = (x: number, y: number, size: number, color: number) => {
+      if (markers >= MAX_PROJECTILES) return;
+      this.position.set(x, 0.2, y);
+      this.quaternion.identity();
+      this.scale.setScalar(size * (1 + 0.1 * Math.sin(time * 18)));
+      this.matrix.compose(this.position, this.quaternion, this.scale);
+      this.scale.setScalar(1);
+      this.markers.setColorAt(markers, this.color.setHex(color));
+      this.markers.setMatrixAt(markers++, this.matrix);
+    };
     for (const z of state.zombies) {
-      if (z.kind !== 'tank' || z.mode !== 'throw' || z.hp <= 0 || rocks >= MAX_PROJECTILES) continue;
+      if (z.hp <= 0) continue;
+      // Dónde va a caer el tanque que saltó (o el zombie que lanzó): para que puedas esquivarlo.
+      if (z.vault?.kind === 'slam') marker(z.vault.tx, z.vault.ty, 3.1, 0xff3020);
+      else if (z.vault?.kind === 'thrown') marker(z.vault.tx, z.vault.ty, 1, 0xff8030);
+      // Tanques cargando el tiro: la roca (o el barril) arriba de la cabeza, sube mientras carga.
+      if (z.kind !== 'tank' || z.mode !== 'throw' || typeof z.carry === 'number') continue;
       const lift = Math.min(1, 1 - z.timer / 1.25);
-      this.euler.set(0, time * 2, 0);
+      this.euler.set(z.carry === 'barrel' ? Math.PI / 2 : 0, time * 2, 0);
       this.quaternion.setFromEuler(this.euler);
       this.position.set(z.x, 2.2 + lift * 1.6, z.y);
       this.scale.setScalar(0.6 + lift * 0.4);
       this.matrix.compose(this.position, this.quaternion, this.scale);
       this.scale.setScalar(1);
-      this.rocks.setMatrixAt(rocks++, this.matrix);
+      if (z.carry === 'barrel') {
+        if (barrels < MAX_PROJECTILES) this.flyingBarrels.setMatrixAt(barrels++, this.matrix);
+      } else if (rocks < MAX_PROJECTILES) this.rocks.setMatrixAt(rocks++, this.matrix);
     }
     for (const p of state.projectiles) {
       const rocket = p.kind === 'rocket';
@@ -125,8 +147,9 @@ export class ExplosivesView {
       this.position.set(p.x, p.z + (p.kind === 'rock' ? 0.45 : 0.16), p.y);
       this.matrix.compose(this.position, this.quaternion, this.scale);
       this.scale.set(1, 1, 1);
-      if (p.kind === 'rock' || p.kind === 'acid') {
+      if (p.kind === 'rock' || p.kind === 'acid' || p.kind === 'barrel') {
         if (p.kind === 'rock' && rocks < MAX_PROJECTILES) this.rocks.setMatrixAt(rocks++, this.matrix);
+        if (p.kind === 'barrel' && barrels < MAX_PROJECTILES) this.flyingBarrels.setMatrixAt(barrels++, this.matrix);
         if (p.kind === 'acid' && grenades < MAX_PROJECTILES) {
           this.grenades.setColorAt(grenades, this.color.setHex(PROJECTILE_COLOR.acid));
           this.grenades.setMatrixAt(grenades++, this.matrix);
@@ -137,7 +160,7 @@ export class ExplosivesView {
           const pulse = 1 + 0.12 * Math.sin(time * (10 + near * 14));
           this.position.set(p.targetX, 0.06, p.targetY);
           this.quaternion.identity();
-          this.scale.setScalar((p.kind === 'acid' ? 1.2 : 1.25 - near * 0.35) * pulse);
+          this.scale.setScalar((p.kind === 'acid' ? 1.2 : p.kind === 'barrel' ? 3.4 - near * 0.6 : 1.25 - near * 0.35) * pulse);
           this.matrix.compose(this.position, this.quaternion, this.scale);
           this.scale.setScalar(1);
           this.markers.setColorAt(markers, this.color.setHex(p.kind === 'acid' ? 0x9cff40 : 0xff3020));
@@ -164,6 +187,7 @@ export class ExplosivesView {
     for (const [mesh, count] of [
       [this.grenades, grenades],
       [this.rocks, rocks],
+      [this.flyingBarrels, barrels],
       [this.blinks, blinks],
       [this.markers, markers],
     ] as const) {

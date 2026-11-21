@@ -162,7 +162,7 @@ export class Sfx {
           break;
         case 'explosion':
           if (e.kind === 'bloater') this.splat(this.place(e.x, e.y, l, 1, 50));
-          else this.explosion(this.place(e.x, e.y, l, e.kind === 'rock' ? 0.8 : e.kind === 'rocket' ? 1.5 : 1.3, 80), e.kind === 'rock');
+          else this.explosion(this.place(e.x, e.y, l, e.kind === 'rock' ? 0.8 : e.kind === 'slam' ? 1.2 : e.kind === 'rocket' ? 1.5 : 1.3, 80), e.kind === 'rock' || e.kind === 'slam');
           break;
         case 'swing':
           this.swing(this.place(e.x, e.y, l, 0.7));

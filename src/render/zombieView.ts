@@ -57,6 +57,36 @@ function zombieParts(radius: number, height: number, armLength: number) {
   return { body, armL, armR, merged };
 }
 
+/**
+ * El tanque: un simio deforme. Torso encorvado hacia adelante, cabeza chica hundida entre los
+ * hombros, brazos enormes que llegan al suelo (camina apoyando los puños), piernas cortas y
+ * bultos en la espalda. Todo en una sola geometría para dibujarlo con un InstancedMesh.
+ * El frente es +x, como en zombieParts.
+ */
+function tankParts(): THREE.BufferGeometry {
+  const parts: THREE.BufferGeometry[] = [];
+  const add = (g: THREE.BufferGeometry, x: number, y: number, z: number, rz = 0, rx = 0) => {
+    g.rotateX(rx);
+    g.rotateZ(rz);
+    g.translate(x, y, z);
+    parts.push(g.index ? g.toNonIndexed() : g);
+  };
+  add(new THREE.CapsuleGeometry(0.85, 0.9, 4, 12), 0.05, 1.6, 0, -0.45); // torso encorvado
+  add(new THREE.SphereGeometry(0.3, 10, 8), 0.85, 2.05, 0); // cabeza hundida
+  add(new THREE.BoxGeometry(0.42, 0.18, 0.4), 1.05, 1.9, 0); // mandíbula
+  for (const side of [-1, 1]) {
+    add(new THREE.SphereGeometry(0.55, 10, 8), 0.35, 2.3, side * 0.95); // hombro
+    add(new THREE.CapsuleGeometry(0.33, 1.3, 4, 8), 0.65, 1.3, side * 1.1, 0.35, side * 0.12); // brazo
+    add(new THREE.BoxGeometry(0.75, 0.55, 0.7), 0.95, 0.3, side * 1.15); // puño en el suelo
+    add(new THREE.CapsuleGeometry(0.28, 0.5, 4, 8), -0.35, 0.45, side * 0.45); // pierna corta
+  }
+  // Bultos (tumores) asimétricos en la espalda.
+  add(new THREE.SphereGeometry(0.4, 8, 6), -0.55, 2.3, 0.3);
+  add(new THREE.SphereGeometry(0.3, 8, 6), -0.7, 1.85, -0.45);
+  add(new THREE.SphereGeometry(0.22, 8, 6), -0.3, 2.65, -0.25);
+  return mergeGeometries(parts) ?? parts[0];
+}
+
 export class ZombieView {
   readonly root = new THREE.Group();
   private readonly walkers: THREE.InstancedMesh;
@@ -86,7 +116,7 @@ export class ZombieView {
     this.walkers = new THREE.InstancedMesh(walker.body, material, MAX_WALKERS);
     this.armsL = new THREE.InstancedMesh(walker.armL, material, MAX_WALKERS);
     this.armsR = new THREE.InstancedMesh(walker.armR, material, MAX_WALKERS);
-    this.tanks = new THREE.InstancedMesh(zombieParts(0.8, 2.6, 0.9).merged, material.clone(), MAX_TANKS);
+    this.tanks = new THREE.InstancedMesh(tankParts(), material.clone(), MAX_TANKS);
     for (const mesh of [this.walkers, this.armsL, this.armsR, this.tanks]) {
       mesh.castShadow = true;
       mesh.count = 0;
@@ -176,7 +206,9 @@ export class ZombieView {
 
   private write(mesh: THREE.InstancedMesh, index: number, z: Zombie, x: number, y: number): void {
     this.quaternion.setFromAxisAngle(this.up, -z.facing);
-    if (z.air > 0) {
+    // Saltando una valla, agarrado o en el salto del tanque va derecho; solo da vueltas el que
+    // sale volando (explosión, embestida) o el que lanzó el tanque.
+    if (z.air > 0 && (!z.vault || z.vault.kind === 'thrown')) {
       // Volando: da vueltas de carnero (gira en torno a su eje lateral según la altura).
       this.tumble.setFromAxisAngle(this.side, z.air * 1.3 + z.id);
       this.quaternion.multiply(this.tumble);
@@ -188,6 +220,18 @@ export class ZombieView {
       this.quaternion.multiply(this.tumble);
     }
     this.position.set(x, z.air + (crawling ? 0.12 : 0), y);
+    // El tanque camina como un simio: se balancea apoyando los puños. Agachado antes de saltar.
+    let squash = 1;
+    if (z.kind === 'tank' && z.air <= 0) {
+      const moving = Math.hypot(z.x - z.prevX, z.y - z.prevY) > 0.01;
+      if (moving) {
+        const gait = this.time * 7 + z.id;
+        this.position.y += Math.abs(Math.sin(gait)) * 0.18;
+        this.tumble.setFromAxisAngle(this.side, -Math.sin(gait * 2) * 0.06);
+        this.quaternion.multiply(this.tumble);
+      }
+      if (z.mode === 'leap') squash = 0.72;
+    }
     // La sonámbula tiembla más mientras más cerca está de despertar.
     if (z.kind === 'sleeper' && z.agitation) {
       const shake = z.agitation * z.agitation * 0.07;
@@ -198,7 +242,7 @@ export class ZombieView {
     const shape = SHAPES[z.kind];
     // El acechador espera agazapado: más bajo y más ancho. Cuando arranca, se para.
     const crouch = z.role === 'ambusher' && z.mode === 'idle' ? 0.62 : 1;
-    this.scale.set(shape[0] * (crouch < 1 ? 1.15 : 1), shape[1] * crouch * (crawling ? 0.75 : 1), shape[0] * (crouch < 1 ? 1.15 : 1));
+    this.scale.set(shape[0] * (crouch < 1 ? 1.15 : 1) * (squash < 1 ? 1.12 : 1), shape[1] * crouch * squash * (crawling ? 0.75 : 1), shape[0] * (crouch < 1 ? 1.15 : 1));
     this.matrix.compose(this.position, this.quaternion, this.scale);
     this.scale.set(1, 1, 1);
     mesh.setMatrixAt(index, this.matrix);
@@ -213,7 +257,7 @@ export class ZombieView {
     if (z.hitFlash > 0) {
       this.color.setHex(0xffffff);
     } else if (z.kind === 'tank') {
-      this.color.setHex(z.mode === 'stunned' ? 0x8a7d5a : z.mode === 'throw' ? 0x9a5040 : 0x6b5b4b);
+      this.color.setHex(z.mode === 'stunned' ? 0x8a7d5a : z.mode === 'throw' || z.mode === 'leap' ? 0xa04838 : 0x6e5648);
     } else if (z.kind === 'sleeper') {
       // Pálida; despierta, se enrojece.
       this.color.setHex(this.time < z.huntUntil ? 0xe0a090 : 0xd8d4c8);

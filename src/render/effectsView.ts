@@ -385,7 +385,8 @@ export class EffectsView {
    */
   private explosion(x: number, y: number, radius: number, kind: string): void {
     const bloater = kind === 'bloater';
-    const rock = kind === 'rock';
+    // El salto del tanque es como la roca: polvo y escombros, sin fuego ni mancha.
+    const rock = kind === 'rock' || kind === 'slam';
     const fire = (color: number, size: number, life: number, grow: number, peak: number) => {
       const material = new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
       const mesh = new THREE.Mesh(this.fireGeometry, material);
