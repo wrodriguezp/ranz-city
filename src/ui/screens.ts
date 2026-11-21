@@ -47,7 +47,7 @@ export class Screens {
     switch (kind) {
       case 'intro':
         this.root.innerHTML = `
-          <h1>ZOMBIE CITY</h1>
+          <h1>RANZ CITY</h1>
           <p class="lead">Son las 02:00. La ciudad cayó. Llega a una salida antes de que se vaya.<br>
           Las salidas cercanas se van antes; la más lejana espera siempre. Mira el reloj y el mapa.</p>
           ${seedLine}${CONTROLS}

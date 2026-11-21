@@ -1,4 +1,4 @@
-// Zombie City: punto de entrada.
+// RanZ City: punto de entrada.
 // Dos modos:
 //   - Juego: controlas al personaje con WASD y apuntas con el mouse.
 //   - Revisión (V): cámara libre para ver la ciudad completa (lo que era el hito 1).
@@ -480,7 +480,7 @@ function updateHud(): void {
   if (mode === 'play') {
     const light = state.flashlight;
     text =
-      `<b>ZOMBIE CITY</b> · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
+      `<b>RANZ CITY</b> · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
       `zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s · ruido ${state.noiseHeat.toFixed(1)}` +
       ` · linterna ${light.on ? 'on' : 'off'} · música ${music.status}\n` +
       `[Esc] pausa y controles  [V] vista de revisión  [F3] grafo`;
@@ -489,7 +489,7 @@ function updateHud(): void {
       .map((e) => `  ${e.kind === 'helicopter' ? 'helicóptero (plaza)' : 'carretera'}: ${e.distance} tramos`)
       .join('\n');
     text =
-      `<b>ZOMBIE CITY</b> · vista de revisión\n${seed}\n` +
+      `<b>RANZ CITY</b> · vista de revisión\n${seed}\n` +
       `${city.grid.buildings.length} edificios · ${city.layout.cutCount} calles cortadas\n` +
       `salidas (desde el inicio verde):\n${exits}\n\n` +
       `[V] volver a jugar  [N] nueva seed  [F3] grafo  [R] recentrar\n` +
