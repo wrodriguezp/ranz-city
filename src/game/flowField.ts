@@ -115,6 +115,12 @@ export class FlowField {
     return true;
   }
 
+  /** Un tile cambió (un barril reventó): se actualiza el mapa de pasables y se recalcula. */
+  setWalkable(index: number, walkable: boolean): void {
+    this.walkable[index] = walkable ? 1 : 0;
+    this.originTile = -1; // el próximo update rehace el BFS
+  }
+
   private visit(index: number, distance: number, tail: number): number {
     if (this.walkable[index] && this.dist[index] === -1) {
       this.dist[index] = distance;

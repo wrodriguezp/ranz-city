@@ -36,6 +36,12 @@ export const Tile = {
   Car: 5,
   /** Caja de suministros: igual que el auto, pero de un solo tile. */
   Crate: 6,
+  /**
+   * Barril explosivo. Sólido mientras exista; un disparo o una explosión lo revienta y el tile
+   * pasa a ser vereda. Es el único tile que cambia durante la partida: cuál explotó se guarda
+   * en el estado dinámico (state.barrelsBlown) y se vuelve a aplicar a la grilla desde ahí.
+   */
+  Barrel: 7,
 } as const;
 export type Tile = (typeof Tile)[keyof typeof Tile];
 

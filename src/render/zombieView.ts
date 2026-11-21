@@ -16,6 +16,15 @@ import { lineOfSight } from '../game/visibility';
 import type { TileGrid } from '../world/tileGrid';
 import { BUILDING_STENCIL } from './cityRenderer';
 
+/** Escala [ancho, alto] de cada tipo sobre la malla del caminante (el tanque tiene la suya). */
+const SHAPES: Record<Zombie['kind'], [number, number]> = {
+  walker: [1, 1],
+  runner: [0.85, 0.95],
+  bloater: [1.65, 0.95],
+  screamer: [0.9, 1.12],
+  tank: [1, 1],
+};
+
 const MAX_WALKERS = 600;
 const MAX_TANKS = 8;
 const MAX_CORPSES = 300;
@@ -49,6 +58,8 @@ export class ZombieView {
   private readonly position = new THREE.Vector3();
   private readonly scale = new THREE.Vector3(1, 1, 1);
   private readonly up = new THREE.Vector3(0, 1, 0);
+  private readonly side = new THREE.Vector3(0, 0, 1);
+  private readonly tumble = new THREE.Quaternion();
   private readonly color = new THREE.Color();
   /** Versión de los cadáveres ya dibujada (usamos el total de muertes, que solo crece). */
   private corpseVersion = -1;
@@ -142,8 +153,17 @@ export class ZombieView {
 
   private write(mesh: THREE.InstancedMesh, index: number, z: Zombie, x: number, y: number): void {
     this.quaternion.setFromAxisAngle(this.up, -z.facing);
-    this.position.set(x, 0, y);
+    if (z.air > 0) {
+      // Volando: da vueltas de carnero (gira en torno a su eje lateral según la altura).
+      this.tumble.setFromAxisAngle(this.side, z.air * 1.3 + z.id);
+      this.quaternion.multiply(this.tumble);
+    }
+    this.position.set(x, z.air, y);
+    // Cada tipo con su silueta: el hinchado es ancho y bajo; el corredor, flaco; el gritón, alto.
+    const shape = SHAPES[z.kind];
+    this.scale.set(shape[0], shape[1], shape[0]);
     this.matrix.compose(this.position, this.quaternion, this.scale);
+    this.scale.set(1, 1, 1);
     mesh.setMatrixAt(index, this.matrix);
     const ghost = mesh === this.walkers ? this.walkerGhosts : this.tankGhosts;
     ghost.setMatrixAt(index, this.matrix);
@@ -151,7 +171,13 @@ export class ZombieView {
     if (z.hitFlash > 0) {
       this.color.setHex(0xffffff);
     } else if (z.kind === 'tank') {
-      this.color.setHex(z.mode === 'stunned' ? 0x8a7d5a : 0x6b5b4b);
+      this.color.setHex(z.mode === 'stunned' ? 0x8a7d5a : z.mode === 'throw' ? 0x9a5040 : 0x6b5b4b);
+    } else if (z.kind === 'runner') {
+      this.color.setHex(0x7a3a30);
+    } else if (z.kind === 'bloater') {
+      this.color.setHex(0x9aa83a);
+    } else if (z.kind === 'screamer') {
+      this.color.setHex(z.stagger > 0 && z.ability > 0 ? 0xffffff : 0xb9b0c8);
     } else {
       // Cada zombie con un tono propio entre verde grisáceo y marrón, fijo por su id.
       const t = ((z.id * 0.618034) % 1 + 1) % 1;

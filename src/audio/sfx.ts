@@ -71,7 +71,15 @@ export class Sfx {
     for (const e of events) {
       switch (e.type) {
         case 'shot':
-          this.shot(this.place(e.fromX, e.fromY, l, 1));
+          // Un perdigón de escopeta no suena: suena el disparo entero (el primero).
+          if (!e.first) break;
+          if (e.weapon === 'shotgun') this.shotgun(this.place(e.fromX, e.fromY, l, 1.1));
+          else if (e.weapon === 'smg') this.smg(this.place(e.fromX, e.fromY, l, 0.75));
+          else this.shot(this.place(e.fromX, e.fromY, l, 1));
+          break;
+        case 'explosion':
+          if (e.kind === 'bloater') this.splat(this.place(e.x, e.y, l, 1, 50));
+          else this.explosion(this.place(e.x, e.y, l, e.kind === 'rock' ? 0.8 : 1.3, 80), e.kind === 'rock');
           break;
         case 'swing':
           this.swing(this.place(e.x, e.y, l, 0.7));
@@ -177,6 +185,23 @@ export class Sfx {
       case 'helicopter':
         this.rotor(this.place(x, y, l, 1, 90));
         break;
+      case 'throw':
+        this.swing(this.place(x, y, l, 0.6));
+        break;
+      case 'bounce':
+        if (this.throttle('bounce', 0.08)) this.click(this.place(x, y, l, 0.7), 0, 900);
+        break;
+      case 'scream':
+        this.scream(this.place(x, y, l, 1, 70));
+        break;
+      case 'weapon':
+        this.click(this.place(x, y, l, 0.6), 0, 1400);
+        this.click(this.place(x, y, l, 0.6), 0.12, 2400);
+        this.blip(this.place(x, y, l, 0.3), [440, 660, 880]);
+        break;
+      case 'switch':
+        this.click(this.place(x, y, l, 0.4), 0, 1700);
+        break;
     }
   }
 
@@ -195,6 +220,7 @@ export class Sfx {
     const ctx = this.ctx!;
     const src = ctx.createBufferSource();
     src.buffer = this.noise;
+    src.loop = true; // el buffer dura 1 s; las explosiones y la horda duran más
     const f = ctx.createBiquadFilter();
     f.type = filter;
     f.frequency.value = freq;
@@ -236,6 +262,64 @@ export class Sfx {
     this.tone(out, 0, 'sine', 150, 40, 0.18, 0.9);
     // Eco de la calle: el mismo estallido, más bajo y apagado, un poco después.
     this.burst(out, 0.09, 0.45, 'lowpass', 900, 0.25);
+  }
+
+  /** Escopeta: más grave y más larga que la pistola, con un eco más fuerte. */
+  private shotgun(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0, 0.35, 'lowpass', 2200, 1.2);
+    this.burst(out, 0, 0.08, 'highpass', 1800, 0.7);
+    this.tone(out, 0, 'sine', 110, 32, 0.3, 1.1);
+    this.burst(out, 0.12, 0.7, 'lowpass', 700, 0.35);
+    // El "chak-chak" de la corredera, un poco después.
+    this.click(out, 0.42, 1300);
+    this.click(out, 0.55, 1900);
+  }
+
+  /** Subfusil: un estallido corto y seco (suena 13 veces por segundo, no puede tener cola larga). */
+  private smg(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0, 0.09, 'lowpass', 4200, 0.8);
+    this.burst(out, 0, 0.03, 'highpass', 3000, 0.5);
+    this.tone(out, 0, 'sine', 180, 60, 0.07, 0.6);
+  }
+
+  /**
+   * Explosión: un golpe sub-grave que se siente (senoidal de 90 a 25 Hz), el estruendo de ruido
+   * filtrado que se va cerrando (cada vez más apagado: así suena algo grande y lejano) y el
+   * retumbar de los edificios.
+   */
+  private explosion(out: AudioNode | null, small: boolean): void {
+    if (!out) return;
+    const size = small ? 0.5 : 1;
+    this.tone(out, 0, 'sine', 90, 25, 0.9 * size, 1.4 * size);
+    const roar = this.burst(out, 0, 1.4 * size, 'lowpass', 3000, 1.3 * size);
+    roar.frequency.exponentialRampToValueAtTime(250, this.ctx!.currentTime + 1.2 * size);
+    this.burst(out, 0, 0.12, 'highpass', 2000, 0.8 * size);
+    if (!small) this.burst(out, 0.25, 2.2, 'lowpass', 180, 0.5);
+  }
+
+  /** El hinchado revienta: un "plaf" húmedo y grave. */
+  private splat(out: AudioNode | null): void {
+    if (!out) return;
+    this.tone(out, 0, 'sine', 70, 30, 0.35, 1);
+    this.burst(out, 0, 0.3, 'bandpass', 500, 1, 1.5);
+    this.burst(out, 0.05, 0.4, 'lowpass', 900, 0.5);
+  }
+
+  /** Grito del gritón: dos chillidos agudos y desafinados que suben y bajan. */
+  private scream(out: AudioNode | null): void {
+    if (!out) return;
+    const ctx = this.ctx!;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'bandpass';
+    lp.frequency.value = 1400;
+    lp.Q.value = 1.2;
+    lp.connect(out);
+    this.tone(lp, 0, 'sawtooth', 520, 900, 0.5, 0.7);
+    this.tone(lp, 0.02, 'sawtooth', 560, 960, 0.55, 0.5);
+    this.tone(lp, 0.5, 'sawtooth', 950, 420, 0.9, 0.7);
+    this.burst(out, 0, 1.3, 'bandpass', 2500, 0.3, 2);
   }
 
   private swing(out: AudioNode | null): void {

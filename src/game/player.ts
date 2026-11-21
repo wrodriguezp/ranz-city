@@ -26,6 +26,12 @@ export interface PlayerState {
   sneaking: boolean;
   /** Distancia caminada desde el último paso (para el sonido y el ruido de las pisadas). */
   stride: number;
+  /** Altura y velocidad vertical: una explosión o el tanque te pueden mandar a volar. */
+  air: number;
+  airV: number;
+  /** Posición del paso anterior (el tanque la usa para adelantar la puntería de la roca). */
+  prevX: number;
+  prevY: number;
 }
 
 export interface PlayerIntent {
@@ -39,12 +45,38 @@ export interface PlayerIntent {
 }
 
 export function createPlayer(x: number, y: number): PlayerState {
-  return { x, y, facing: 0, hp: PLAYER_MAX_HP, knockX: 0, knockY: 0, hurtTimer: 99, sneaking: false, stride: 0 };
+  return {
+    x,
+    y,
+    facing: 0,
+    hp: PLAYER_MAX_HP,
+    knockX: 0,
+    knockY: 0,
+    hurtTimer: 99,
+    sneaking: false,
+    stride: 0,
+    air: 0,
+    airV: 0,
+    prevX: x,
+    prevY: y,
+  };
 }
 
 export function updatePlayer(player: PlayerState, intent: PlayerIntent, grid: TileGrid, dt: number): void {
   player.sneaking = intent.sneak;
-  const speed = PLAYER_SPEED * (intent.sneak ? SNEAK_SPEED_FACTOR : 1);
+  player.prevX = player.x;
+  player.prevY = player.y;
+  // En el aire: sigue el arco y casi no se controla el movimiento.
+  if (player.airV !== 0 || player.air > 0) {
+    player.airV -= 30 * dt;
+    player.air += player.airV * dt;
+    if (player.air <= 0) {
+      player.air = 0;
+      player.airV = 0;
+    }
+  }
+  const airborne = player.air > 0;
+  const speed = PLAYER_SPEED * (intent.sneak ? SNEAK_SPEED_FACTOR : 1) * (airborne ? 0.25 : 1);
   const moved = moveCircle(
     grid,
     player.x,
@@ -55,7 +87,7 @@ export function updatePlayer(player: PlayerState, intent: PlayerIntent, grid: Ti
   );
   player.stride += Math.hypot(moved.x - player.x, moved.y - player.y);
   // El empujón decae exponencialmente: ~90% menos en un cuarto de segundo.
-  const decay = Math.exp(-9 * dt);
+  const decay = Math.exp((airborne ? -2 : -9) * dt);
   player.knockX *= decay;
   player.knockY *= decay;
   player.hurtTimer += dt;

@@ -123,3 +123,9 @@ canvas { cursor: crosshair; }
 }
 #damage-text .dmg.kill { color: #ff8a6b; font-size: 17px; }
 #damage-text .dmg.crit { color: #ffd84a; font-size: 22px; }
+
+/* Fila de armas */
+#game-hud .slots { margin-top: 4px; display: flex; gap: 4px; font-size: 11px; }
+#game-hud .slots .slot { padding: 1px 5px; border-radius: 3px; background: rgba(255,255,255,0.08); color: #bbb; }
+#game-hud .slots .slot.on { background: #ffd25a; color: #111; font-weight: bold; }
+#game-hud .slots .slot.none { opacity: 0.25; }

@@ -35,8 +35,8 @@ export class PlayerView {
    * Ojo con el signo: en el mundo 2D el ángulo se mide de x hacia y (que en 3D es z),
    * pero en Three.js rotar en torno a Y positivo va de x hacia −z. Por eso se invierte.
    */
-  update(x: number, y: number, facing: number): void {
-    this.root.position.set(x, 0, y);
+  update(x: number, y: number, facing: number, air = 0): void {
+    this.root.position.set(x, air, y);
     this.root.rotation.y = -facing;
   }
 

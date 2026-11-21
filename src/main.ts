@@ -13,6 +13,7 @@ import type { GameEvent, GameState } from './game/state';
 import { buildCityView, type CityView } from './render/cityRenderer';
 import { EffectsView } from './render/effectsView';
 import { PropsView } from './render/propsView';
+import { ExplosivesView } from './render/explosivesView';
 import { searchPrompt } from './game/loot';
 import { exitName } from './game/escape';
 import { EvacView } from './render/evacView';
@@ -93,6 +94,7 @@ const damageText = new DamageText();
 let hitstop = 0;
 const sfx = new Sfx();
 let propsView: PropsView | undefined;
+let explosivesView: ExplosivesView | undefined;
 let mapView: MapView | undefined;
 let evacView: EvacView | undefined;
 const screens = new Screens();
@@ -133,6 +135,12 @@ function loadCity(seedText: string): void {
   }
   propsView = new PropsView(city.props);
   scene.add(propsView.root);
+  if (explosivesView) {
+    scene.remove(explosivesView.root);
+    explosivesView.dispose();
+  }
+  explosivesView = new ExplosivesView(city.barrels);
+  scene.add(explosivesView.root);
 
   startGame();
   resetReviewCamera();
@@ -222,15 +230,21 @@ function readIntent(): Intent {
     search: input.isDown('KeyE'),
     sneak: input.isDown('ShiftLeft') || input.isDown('ShiftRight'),
     attack: input.consume('Mouse0'),
+    attackHeld: input.isDown('Mouse0'),
+    throwGrenade: input.consume('KeyG'),
     melee: input.consume('Mouse2') || input.consume('Space'),
     reload: input.consume('KeyR'),
     select: input.consume('KeyQ')
-      ? 'swap'
+      ? 'next'
       : input.consume('Digit1')
         ? 'melee'
         : input.consume('Digit2')
           ? 'pistol'
-          : undefined,
+          : input.consume('Digit3')
+            ? 'shotgun'
+            : input.consume('Digit4')
+              ? 'smg'
+              : undefined,
   };
 }
 
@@ -291,8 +305,9 @@ function frame(now: number): void {
     const x = previous.x + (p.x - previous.x) * alpha;
     const y = previous.y + (p.y - previous.y) * alpha;
     const facing = lerpAngle(previous.facing, p.facing, alpha);
-    playerView.update(x, y, facing);
+    playerView.update(x, y, facing, p.air);
     zombieView.update(state, city.grid, x, y, alpha);
+    explosivesView?.update(state, now / 1000);
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
@@ -319,6 +334,7 @@ function frame(now: number): void {
   } else {
     playerView.update(state.player.x, state.player.y, state.player.facing);
     zombieView.update(state, city.grid, state.player.x, state.player.y, 1);
+    explosivesView?.update(state, now / 1000);
     cityView?.updateOcclusion();
     reviewControls.update();
     renderer.render(scene, reviewCamera);
@@ -332,8 +348,16 @@ function feel(events: readonly GameEvent[]): void {
   for (const event of events) {
     switch (event.type) {
       case 'shot':
-        gameCamera.shake(0.12);
+        if (event.first) gameCamera.shake(event.weapon === 'shotgun' ? 0.32 : event.weapon === 'smg' ? 0.07 : 0.12);
         break;
+      case 'explosion': {
+        // Más fuerte mientras más cerca: una granada al lado sacude todo; una lejana, apenas.
+        const d = Math.hypot(event.x - state.player.x, event.y - state.player.y);
+        const near = Math.max(0, 1 - d / 30);
+        gameCamera.shake((event.kind === 'rock' ? 0.4 : event.kind === 'bloater' ? 0.45 : 0.9) * near);
+        hitstop = Math.max(hitstop, event.kind === 'rock' ? 0.03 : 0.07 * near);
+        break;
+      }
       case 'hit':
         if (event.killed) {
           gameCamera.shake(event.gib ? 0.35 : 0.2);
@@ -375,7 +399,7 @@ function updateHud(): void {
       `<b>ZOMBIE CITY</b> · ${fps} FPS · lógica ${stepMs.toFixed(2)} ms\n${seed}\n` +
       `zombies ${state.zombies.length} · horda en ${Math.ceil(state.hordeTimer)} s · ruido ${state.noiseHeat.toFixed(1)}` +
       ` · linterna ${light.on ? 'on' : 'off'}\n` +
-      `[Esc] pausa y controles  [V] vista de revisión  [G] grafo`;
+      `[Esc] pausa y controles  [V] vista de revisión  [F3] grafo`;
   } else {
     const exits = city.layout.exits
       .map((e) => `  ${e.kind === 'helicopter' ? 'helicóptero (plaza)' : 'carretera'}: ${e.distance} tramos`)
@@ -384,7 +408,7 @@ function updateHud(): void {
       `<b>ZOMBIE CITY</b> · vista de revisión\n${seed}\n` +
       `${city.grid.buildings.length} edificios · ${city.layout.cutCount} calles cortadas\n` +
       `salidas (desde el inicio verde):\n${exits}\n\n` +
-      `[V] volver a jugar  [N] nueva seed  [G] grafo  [R] recentrar\n` +
+      `[V] volver a jugar  [N] nueva seed  [F3] grafo  [R] recentrar\n` +
       `arrastrar: girar · rueda: zoom · clic derecho: mover`;
   }
   // Solo tocamos el DOM si el texto cambió.
@@ -409,7 +433,8 @@ window.addEventListener('keydown', (event) => {
     case 'KeyO':
       gameHud.flash(sfx.toggleMute() ? 'Sonido apagado [O]' : 'Sonido encendido [O]');
       break;
-    case 'KeyG':
+    case 'F3':
+      event.preventDefault(); // en el navegador F3 abre "buscar"
       if (cityView) cityView.graphOverlay.visible = !cityView.graphOverlay.visible;
       break;
     case 'KeyR':

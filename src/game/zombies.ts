@@ -20,6 +20,7 @@
 
 import type { City } from '../world/city';
 import { isSolid, moveCircle } from './collision';
+import { queueBlast, throwRock } from './explosives';
 import { flashlightPower } from './flashlight';
 import type { FlowField } from './flowField';
 import { PLAYER_RADIUS } from './player';
@@ -47,8 +48,25 @@ const STATS: Record<
   { hp: number; radius: number; minSpeed: number; maxSpeed: number; damage: number; cooldown: number; reach: number }
 > = {
   walker: { hp: 100, radius: 0.35, minSpeed: 2.6, maxSpeed: 3.9, damage: 7, cooldown: 1.1, reach: 0.45 },
+  runner: { hp: 50, radius: 0.32, minSpeed: 5.4, maxSpeed: 6.2, damage: 5, cooldown: 0.75, reach: 0.4 },
+  bloater: { hp: 140, radius: 0.55, minSpeed: 1.7, maxSpeed: 2.1, damage: 10, cooldown: 1.4, reach: 0.45 },
+  screamer: { hp: 70, radius: 0.33, minSpeed: 2.8, maxSpeed: 3.3, damage: 4, cooldown: 1, reach: 0.4 },
   tank: { hp: 1100, radius: 0.8, minSpeed: 2.1, maxSpeed: 2.1, damage: 30, cooldown: 1.6, reach: 0.55 },
 };
+
+/** Gravedad para los zombies que salen volando (igual que la de las granadas). */
+const AIR_GRAVITY = 30;
+/** El gritón: cuánto se oye su grito, cada cuánto puede gritar y el tamaño de la horda que llama. */
+const SCREAM_NOISE = 32;
+const SCREAM_COOLDOWN = 22;
+const SCREAM_HORDE = 8;
+/** La roca del tanque: distancias en las que la tira, cuánto tarda en prepararla y cada cuánto. */
+const ROCK_MIN = 9;
+const ROCK_MAX = 22;
+const ROCK_WINDUP = 0.9;
+const ROCK_COOLDOWN = 8;
+/** La embestida arrolla a los zombies que se cruza: los lanza por el aire. */
+const CHARGE_LAUNCH_DAMAGE = 45;
 
 const WANDER_SPEED = 0.7;
 const THINK_EVERY = 10;
@@ -104,7 +122,25 @@ export function createZombie(state: GameState, x: number, y: number, kind: Zombi
     hordeUntil: 0,
     homeX: x,
     homeY: y,
+    air: 0,
+    airV: 0,
+    ability: kind === 'tank' ? 4 : 0,
   };
+}
+
+/**
+ * Lanza a un zombie por el aire: empujón horizontal (vx, vy) y velocidad hacia arriba (up).
+ * Mientras vuela no ataca ni piensa en moverse; al caer queda aturdido un momento.
+ * El tanque pesa demasiado: apenas se mueve.
+ */
+export function launchZombie(z: Zombie, vx: number, vy: number, up: number): void {
+  const heavy = z.kind === 'tank' ? 0.1 : z.kind === 'bloater' ? 0.6 : 1;
+  z.knockX += vx * heavy;
+  z.knockY += vy * heavy;
+  if (z.kind !== 'tank') {
+    z.airV = Math.max(z.airV, up);
+    z.air = Math.max(z.air, 0.01);
+  }
 }
 
 export function initialHordeTimer(): number {
@@ -124,7 +160,7 @@ export function makeNoise(state: GameState, x: number, y: number, radius: number
     // El tanque está "de guardia": oye menos.
     const r = z.kind === 'tank' ? radius * 0.6 : radius;
     const d = Math.hypot(z.x - x, z.y - y);
-    if (d > r || z.mode === 'charge' || z.mode === 'stunned') continue;
+    if (d > r || z.mode === 'charge' || z.mode === 'stunned' || z.mode === 'throw') continue;
     // El que te está viendo no se distrae con un ruido.
     if (z.mode === 'chase' && z.seesPlayer) continue;
     z.mode = 'investigate';
@@ -167,13 +203,13 @@ export function damageZombie(
     damage: Math.round(amount),
     killed,
     // Revienta si lo dice el arma, o si el golpe fue mucho más de lo que le quedaba.
-    gib: killed && (options.gib === true || -z.hp > z.maxHp * 0.6),
+    gib: killed && (options.gib === true || -z.hp > z.maxHp * 0.6 || z.kind === 'bloater'),
     crit: options.crit === true,
     kind: z.kind,
   });
   // Golpearlo lo despierta aunque no te haya visto. De cerca sabe de dónde vino; de lejos
   // (una bala desde la oscuridad) solo sabe la dirección aproximada: va a investigar.
-  if (z.mode !== 'charge' && z.mode !== 'stunned') {
+  if (z.mode !== 'charge' && z.mode !== 'stunned' && z.mode !== 'throw') {
     const d = Math.hypot(state.player.x - z.x, state.player.y - z.y);
     if (d < 12 || z.seesPlayer) {
       z.mode = 'chase';
@@ -187,6 +223,8 @@ export function damageZombie(
   }
   if (z.hp <= 0) {
     state.stats.kills++;
+    // El hinchado revienta: la explosión sale un instante después (por la cola de explosiones).
+    if (z.kind === 'bloater') queueBlast(state, z.x, z.y, 'bloater', 0.05);
     state.corpses.push({ x: z.x, y: z.y, facing: z.facing, kind: z.kind });
     if (state.corpses.length > 300) state.corpses.shift();
     if (z.kind === 'tank') state.events.push({ type: 'message', text: '¡Cayó el tanque!', tone: 'good' });
@@ -221,16 +259,29 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
     const toY = player.y - z.y;
     const dist = Math.hypot(toX, toY);
     const asleep = dist > SLEEP_DISTANCE && (z.mode === 'idle' || z.mode === 'wander');
-    if (asleep && z.knockX === 0 && z.knockY === 0) continue;
+    if (asleep && z.knockX === 0 && z.knockY === 0 && z.air === 0) continue;
+
+    // --- Vuelo: si una explosión o el tanque lo lanzó, sigue el arco hasta caer -------------
+    const flying = z.air > 0;
+    if (flying) {
+      z.airV -= AIR_GRAVITY * dt;
+      z.air += z.airV * dt;
+      if (z.air <= 0) {
+        // Aterrizaje: queda en el suelo aturdido un rato.
+        z.air = 0;
+        z.airV = 0;
+        z.stagger = Math.max(z.stagger, 0.7);
+      }
+    }
 
     // --- Pensar (6 veces por segundo) -------------------------------------------------------
-    if ((state.tick + z.id) % THINK_EVERY === 0) think(state, rt, z, dist, toX, toY, sight);
+    if (!flying && (state.tick + z.id) % THINK_EVERY === 0) think(state, rt, z, dist, toX, toY, sight);
 
     // --- Velocidad deseada según el modo ----------------------------------------------------
     let vx = 0;
     let vy = 0;
     const stats = STATS[z.kind];
-    if (z.stagger <= 0) {
+    if (z.stagger <= 0 && !flying) {
       switch (z.mode) {
         case 'chase':
           if (z.seesPlayer || dist < 1.5 || !rt.field.direction(z.x, z.y, flow)) {
@@ -281,6 +332,21 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
           vy = Math.sin(z.facing) * CHARGE_SPEED;
           z.timer -= dt;
           if (z.timer <= 0) startStun(z, 0.6);
+          trample(state, rt, z, i);
+          break;
+        case 'throw':
+          // Preparando la roca: quieto, mirando al jugador. Al terminar, la tira.
+          z.facing = turnToward(z.facing, Math.atan2(toY, toX), 5 * dt);
+          z.timer -= dt;
+          if (z.timer <= 0) {
+            // Apunta a donde vas a estar (un poco adelantado según cómo te mueves), con error.
+            const lead = 0.35;
+            const tx = player.x + (player.x - player.prevX) * 60 * lead + randomRange(state, -1, 1);
+            const ty = player.y + (player.y - player.prevY) * 60 * lead + randomRange(state, -1, 1);
+            throwRock(state, z.x, z.y, tx, ty);
+            z.mode = 'chase';
+            z.ability = ROCK_COOLDOWN;
+          }
           break;
         case 'stunned':
           z.timer -= dt;
@@ -294,6 +360,7 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
       }
     }
 
+    z.ability -= dt;
     // Girar el cuerpo hacia donde camina (salvo en la embestida, que va recta).
     if (z.mode !== 'charge' && vx * vx + vy * vy > 0.04) z.facing = turnToward(z.facing, Math.atan2(vy, vx), 7 * dt);
 
@@ -329,7 +396,8 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
     const moved = moveCircle(grid, z.x, z.y, z.radius, mx, my);
     z.x = moved.x;
     z.y = moved.y;
-    const decay = Math.exp(-8 * dt);
+    // En el aire casi no hay roce: el que sale volando llega lejos.
+    const decay = Math.exp((flying ? -1.5 : -8) * dt);
     z.knockX = Math.abs(z.knockX) < 0.05 ? 0 : z.knockX * decay;
     z.knockY = Math.abs(z.knockY) < 0.05 ? 0 : z.knockY * decay;
 
@@ -348,7 +416,7 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
     const py = player.y - z.y;
     const pd = Math.hypot(px, py);
     const touch = z.radius + PLAYER_RADIUS;
-    if (pd < touch && pd > 0) {
+    if (pd < touch && pd > 0 && !flying && player.air < 0.5) {
       // Se empujan: el zombie retrocede y el jugador también un poco (una horda te encierra).
       const overlap = touch - pd;
       const fixed = moveCircle(grid, z.x, z.y, z.radius, (-px / pd) * overlap * 0.7, (-py / pd) * overlap * 0.7);
@@ -360,10 +428,15 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
 
     if (z.mode === 'charge' && pd < touch + 0.3) {
       hurtPlayer(state, CHARGE_DAMAGE);
-      player.knockX = (px / (pd || 1)) * 14;
-      player.knockY = (py / (pd || 1)) * 14;
+      // Te manda a volar: hacia adelante (por donde venía el tanque) y un poco hacia el costado.
+      const fx = Math.cos(z.facing);
+      const fy = Math.sin(z.facing);
+      player.knockX = fx * 13 + (px / (pd || 1)) * 6;
+      player.knockY = fy * 13 + (py / (pd || 1)) * 6;
+      player.airV = 7;
       startStun(z, 0.9);
     } else if (
+      !flying &&
       z.stagger <= 0 &&
       z.mode !== 'stunned' &&
       z.mode !== 'charge' &&
@@ -416,11 +489,12 @@ function think(
     z.lastSeenAt = state.time;
     z.targetX = state.player.x;
     z.targetY = state.player.y;
-    if (z.mode !== 'chase' && z.mode !== 'charge' && z.mode !== 'stunned') {
+    if (z.mode !== 'chase' && z.mode !== 'charge' && z.mode !== 'stunned' && z.mode !== 'throw') {
       state.events.push({ type: 'sfx', name: 'spotted', x: z.x, y: z.y });
       z.mode = 'chase';
       z.timer = z.kind === 'tank' ? 1.5 : 0;
     }
+    if (z.kind === 'screamer' && z.ability <= 0) scream(state, rt, z);
   }
 
   switch (z.mode) {
@@ -438,6 +512,12 @@ function think(
           z.facing = Math.atan2(toY, toX);
           z.timer = CHARGE_TIME;
           state.events.push({ type: 'message', text: '¡El tanque embiste!', tone: 'danger' });
+        }
+        // De lejos, si te ve, arranca un trozo de pavimento y te lo tira.
+        if (z.mode === 'chase' && z.seesPlayer && z.ability <= 0 && dist > ROCK_MIN && dist < ROCK_MAX) {
+          z.mode = 'throw';
+          z.timer = ROCK_WINDUP;
+          state.events.push({ type: 'message', text: '¡El tanque arranca un trozo de calle!', tone: 'danger' });
         }
         // Si te alejas mucho, vuelve a su puesto a vigilar.
         if (!z.seesPlayer && dist > 30 && state.time - z.lastSeenAt > 8) z.mode = 'return';
@@ -496,6 +576,45 @@ function lineOfSightCached(rt: ZombieRuntime, z: Zombie, x: number, y: number, t
   return losCache.get(z.id)!;
 }
 
+/**
+ * El gritón te vio: chilla. Es un ruido enorme (todos los de alrededor vienen a mirar) y además
+ * llama a una horda chica. Se queda quieto gritando un segundo: la ventana para callarlo.
+ */
+function scream(state: GameState, rt: ZombieRuntime, z: Zombie): void {
+  z.ability = SCREAM_COOLDOWN;
+  z.stagger = 1.1;
+  state.events.push({ type: 'sfx', name: 'scream', x: z.x, y: z.y });
+  state.events.push({ type: 'message', text: '¡Un gritón te vio y está llamando a los demás!', tone: 'danger' });
+  makeNoise(state, z.x, z.y, SCREAM_NOISE, rt);
+  // El grito apunta a donde estás TÚ (te está viendo), no a él.
+  state.lastNoise = { x: state.player.x, y: state.player.y, time: state.time };
+  rt.noiseField.update(state.player.x, state.player.y);
+  state.noiseHeat += 4;
+  spawnHorde(state, rt, SCREAM_HORDE);
+}
+
+/**
+ * La embestida del tanque arrolla lo que encuentra: los zombies en su camino salen volando hacia
+ * los costados (y se lastiman). Se usa la grilla espacial para no revisar a los 300.
+ */
+function trample(state: GameState, rt: ZombieRuntime, tank: Zombie, self: number): void {
+  const fx = Math.cos(tank.facing);
+  const fy = Math.sin(tank.facing);
+  rt.hash.query(tank.x, tank.y, tank.radius + 1, (j) => {
+    if (j === self) return;
+    const o = state.zombies[j];
+    if (!o || o.hp <= 0 || o.air > 0 || o.kind === 'tank') return;
+    const dx = o.x - tank.x;
+    const dy = o.y - tank.y;
+    const d = Math.hypot(dx, dy);
+    if (d > tank.radius + o.radius + 0.3) return;
+    // Hacia qué costado sale: el lado del tanque en el que estaba (producto cruz).
+    const side = fx * dy - fy * dx >= 0 ? 1 : -1;
+    damageZombie(state, o, CHARGE_LAUNCH_DAMAGE, 0, 0, 0.5, {});
+    launchZombie(o, fx * 9 - fy * side * 7, fy * 9 + fx * side * 7, 8);
+  });
+}
+
 function startStun(z: Zombie, seconds: number): void {
   z.mode = 'stunned';
   z.timer = seconds;
@@ -506,6 +625,12 @@ export function hurtPlayer(state: GameState, damage: number): void {
   state.player.hp = Math.max(0, state.player.hp - damage);
   state.player.hurtTimer = 0;
   state.events.push({ type: 'hurt', damage });
+}
+
+/** Las hordas son sobre todo caminantes, con algún corredor y algún hinchado entre medio. */
+function hordeKind(state: GameState): ZombieKind {
+  const r = random(state);
+  return r < 0.14 ? 'runner' : r < 0.2 ? 'bloater' : 'walker';
 }
 
 function turnToward(current: number, target: number, maxStep: number): number {
@@ -568,7 +693,7 @@ export function spawnHorde(state: GameState, rt: ZombieRuntime, size: number): b
       const zx = x + randomRange(state, -3, 3);
       const zy = y + randomRange(state, -3, 3);
       if (isSolid(grid, Math.floor(zx), Math.floor(zy)) || rt.field.distanceAt(zx, zy) < 0) continue;
-      const z = createZombie(state, zx, zy, 'walker');
+      const z = createZombie(state, zx, zy, hordeKind(state));
       // Un movimiento nulo aplica la "depenetración": si quedó pegado a un muro, lo saca.
       const fixed = moveCircle(grid, zx, zy, z.radius, 0, 0);
       z.x = z.prevX = fixed.x;

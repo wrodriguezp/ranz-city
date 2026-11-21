@@ -19,7 +19,14 @@ export function blocksSight(tile: Tile | undefined): boolean {
 
 /** Bloquea las BALAS: todo lo sólido. */
 export function blocksBullets(tile: Tile | undefined): boolean {
-  return tile === undefined || tile === Tile.Building || tile === Tile.Barricade || tile === Tile.Car || tile === Tile.Crate;
+  return (
+    tile === undefined ||
+    tile === Tile.Building ||
+    tile === Tile.Barricade ||
+    tile === Tile.Car ||
+    tile === Tile.Crate ||
+    tile === Tile.Barrel
+  );
 }
 
 /**

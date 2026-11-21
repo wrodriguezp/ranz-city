@@ -14,7 +14,8 @@ import type { Rng } from './rng';
 import { BLOCK_SIZE, blockStart, nodeStart, STREET_WIDTH, Tile, type TileGrid } from './tileGrid';
 import { dangerAt, type ZoneMap } from './zones';
 
-export type LootType = 'ammo' | 'medkit' | 'battery';
+/** ammo = balas livianas (pistola y subfusil); shells = cartuchos de escopeta. */
+export type LootType = 'ammo' | 'shells' | 'grenade' | 'medkit' | 'battery' | 'shotgun' | 'smg';
 export type ContainerKind = 'car' | 'crate' | 'body';
 
 export interface LootItem {
@@ -45,6 +46,14 @@ const CRATES_PER_BLOCK_MAX = 2;
 const CAR_ALARM_CHANCE = 0.18;
 /** Ni autos ni cajas pegados al inicio: el arranque tiene que ser despejado. */
 const CLEAR_RADIUS = 8;
+const BARRELS_PER_BLOCK_MAX = 2;
+
+/** Barril explosivo (ver Tile.Barrel). Sale de la seed, como los contenedores. */
+export interface Barrel {
+  id: number;
+  x: number;
+  y: number;
+}
 
 export function placeProps(
   grid: TileGrid,
@@ -117,7 +126,12 @@ export function placeProps(
         [BLOCK_SIZE - 3, BLOCK_SIZE - 3],
         [2, BLOCK_SIZE - 3],
       ];
-      const guaranteed: LootItem[][] = [[{ type: 'ammo', amount: 12 }], [{ type: 'medkit', amount: 1 }], [{ type: 'battery', amount: 1 }]];
+      // Depósito militar: el subfusil y granadas. Llegar a la plaza tiene premio.
+      const guaranteed: LootItem[][] = [
+        [{ type: 'smg', amount: 1 }, { type: 'ammo', amount: 40 }],
+        [{ type: 'medkit', amount: 2 }, { type: 'grenade', amount: 2 }],
+        [{ type: 'shells', amount: 8 }, { type: 'battery', amount: 1 }],
+      ];
       corners.forEach(([ox, oy], i) => {
         const x = block.x + ox;
         const y = block.y + oy;
@@ -140,7 +154,40 @@ export function placeProps(
     }
   }
 
+  // 3. Herramientas de arranque: entre los contenedores más cercanos al inicio, uno tiene una
+  // escopeta y otro granadas. Sin esto, la primera horda se pelea solo con bate y pistola.
+  const byDistance = containers
+    .filter((c) => c.kind !== 'body')
+    .sort((a, b) => Math.hypot(a.x - spawn.x, a.y - spawn.y) - Math.hypot(b.x - spawn.x, b.y - spawn.y));
+  byDistance[1]?.loot.push({ type: 'shotgun', amount: 1 }, { type: 'shells', amount: 10 });
+  byDistance[3]?.loot.push({ type: 'grenade', amount: 2 });
+
   return containers;
+}
+
+/**
+ * Barriles explosivos sobre las veredas, pegados a la calle. Más en las zonas peligrosas:
+ * ahí es donde más se necesitan para frenar una horda.
+ */
+export function placeBarrels(grid: TileGrid, zones: ZoneMap, spawn: { x: number; y: number }, rng: Rng): Barrel[] {
+  const barrels: Barrel[] = [];
+  for (const block of grid.blocks) {
+    if (block.isPlaza) continue;
+    const danger = dangerAt(zones, block.x + BLOCK_SIZE / 2, block.y + BLOCK_SIZE / 2);
+    const count = rng.int(0, BARRELS_PER_BLOCK_MAX) + (rng.chance(danger) ? 1 : 0);
+    for (let n = 0; n < count; n++) {
+      // Sobre el borde exterior de la vereda (pegado a la calle), lejos de las esquinas.
+      const side = rng.int(0, 3);
+      const offset = rng.int(3, BLOCK_SIZE - 4);
+      const x = side === 2 ? block.x : side === 3 ? block.x + BLOCK_SIZE - 1 : block.x + offset;
+      const y = side === 0 ? block.y : side === 1 ? block.y + BLOCK_SIZE - 1 : block.y + offset;
+      if (Math.hypot(x + 0.5 - spawn.x, y + 0.5 - spawn.y) < 12) continue;
+      if (grid.tiles[y * grid.width + x] !== Tile.Sidewalk) continue;
+      grid.tiles[y * grid.width + x] = Tile.Barrel;
+      barrels.push({ id: barrels.length, x, y });
+    }
+  }
+  return barrels;
 }
 
 /**
@@ -156,10 +203,15 @@ function rollLoot(kind: ContainerKind, danger: number, rng: Rng): LootItem[] {
   for (let i = 0; i < rolls; i++) {
     if (i > 0 && rng.chance(0.45 - 0.2 * danger)) continue; // vacío
     const r = rng.float();
-    if (r < 0.6) items.push({ type: 'ammo', amount: rng.int(6, 12) + Math.round(danger * 10) });
-    else if (r < 0.8 + 0.05 * danger) items.push({ type: 'medkit', amount: 1 });
+    if (r < 0.42) items.push({ type: 'ammo', amount: rng.int(6, 12) + Math.round(danger * 10) });
+    else if (r < 0.58) items.push({ type: 'shells', amount: rng.int(3, 6) + Math.round(danger * 4) });
+    else if (r < 0.68) items.push({ type: 'grenade', amount: 1 });
+    else if (r < 0.84) items.push({ type: 'medkit', amount: 1 });
     else items.push({ type: 'battery', amount: 1 });
   }
+  // Armas: raras, más en autos (la guantera, el maletero) y en zonas peligrosas.
+  const weaponChance = (kind === 'car' ? 0.1 : 0.04) + 0.08 * danger;
+  if (rng.chance(weaponChance)) items.push({ type: rng.chance(0.55) ? 'shotgun' : 'smg', amount: 1 });
   return mergeLoot(items);
 }
 

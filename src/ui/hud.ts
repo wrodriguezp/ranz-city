@@ -4,7 +4,7 @@
 // es caro; comparar strings no).
 
 import { BATTERY_SECONDS, LOW_BATTERY } from '../game/flashlight';
-import { PISTOL_MAG } from '../game/combat';
+import { GUNS, isGun, WEAPON_ORDER } from '../game/combat';
 import { PLAYER_MAX_HP } from '../game/player';
 import type { GameEvent, GameState } from '../game/state';
 
@@ -115,16 +115,22 @@ export class Hud {
     this.set(this.batteryText, light.on ? `${minutes}s` : 'off');
 
     const w = state.weapon;
-    const weaponHtml =
-      w.current === 'pistol'
-        ? `<b>PISTOLA</b> ${w.reloadTimer > 0 ? '<i>recargando…</i>' : `${w.mag}/${PISTOL_MAG}`} <span class="dim">· reserva ${w.reserve}</span>`
-        : `<b>BATE</b> <span class="dim">· pistola ${w.mag}/${PISTOL_MAG} + ${w.reserve}</span>`;
-    this.set(this.weapon, weaponHtml);
+    const current = w.current;
+    const main = isGun(current)
+      ? `<b>${GUNS[current].name}</b> ${w.reloadTimer > 0 ? '<i>recargando…</i>' : `${w.mags[current]}/${GUNS[current].mag}`} <span class="dim">· reserva ${w.ammo[GUNS[current].ammo]}</span>`
+      : `<b>BATE</b>`;
+    // La fila de armas: las que tienes, con su tecla; la de la mano, resaltada.
+    const slots = WEAPON_ORDER.map((id, i) => {
+      if (!w.owned[id]) return `<span class="slot none">${i + 1}</span>`;
+      const label = id === 'melee' ? 'bate' : GUNS[id].name.toLowerCase();
+      return `<span class="slot${id === current ? ' on' : ''}">${i + 1} ${label}</span>`;
+    }).join('');
+    this.set(this.weapon, `${main}<div class="slots">${slots}</div>`);
 
     const inv = state.inventory;
     this.set(
       this.items,
-      `botiquines <b>${inv.medkits}</b> [H] · baterías <b>${inv.batteries}</b> [B] · muertes <b>${state.stats.kills}</b>`,
+      `granadas <b>${inv.grenades}</b> [G] · botiquines <b>${inv.medkits}</b> [H] · baterías <b>${inv.batteries}</b> [B] · balas <b>${w.ammo.light}</b> · cartuchos <b>${w.ammo.shells}</b> · muertes <b>${state.stats.kills}</b>`,
     );
 
     // Sigilo: ¿cuántos te están persiguiendo? Si ninguno, estás oculto.

@@ -25,6 +25,10 @@ const FLASHLIGHT_HEIGHT = 1.3;
 export class NightLighting {
   readonly flashlight: THREE.SpotLight;
   readonly muzzle: THREE.PointLight;
+  /** Luz de las explosiones: existe siempre (intensidad 0) por lo mismo que el fogonazo. */
+  private readonly boom: THREE.PointLight;
+  private boomTimer = 0;
+  private boomPower = 0;
   private readonly hemisphere: THREE.HemisphereLight;
   private readonly moon: THREE.DirectionalLight;
   private readonly aura: THREE.PointLight;
@@ -45,8 +49,9 @@ export class NightLighting {
 
     this.aura = new THREE.PointLight(0xffd9a8, 4, 5.5, 1.4);
     this.muzzle = new THREE.PointLight(0xffc060, 0, 14, 1.3);
+    this.boom = new THREE.PointLight(0xff8a30, 0, 26, 1.2);
 
-    scene.add(this.hemisphere, this.moon, this.flashlight, this.flashlight.target, this.aura, this.muzzle);
+    scene.add(this.hemisphere, this.moon, this.flashlight, this.flashlight.target, this.aura, this.muzzle, this.boom);
   }
 
   /** En la vista de revisión queremos ver la ciudad completa: luz de día. */
@@ -71,6 +76,18 @@ export class NightLighting {
 
     this.muzzleTimer = Math.max(0, this.muzzleTimer - dt);
     this.muzzle.intensity = this.muzzleTimer > 0 ? 60 * (this.muzzleTimer / 0.06) : 0;
+    // La explosión ilumina la cuadra entera por un instante: también se ven los zombies.
+    this.boomTimer = Math.max(0, this.boomTimer - dt);
+    const t = this.boomTimer / 0.45;
+    this.boom.intensity = this.boomPower * t * t;
+  }
+
+  /** Destello de una explosión en (x, y). */
+  blast(x: number, y: number, radius: number): void {
+    this.boom.position.set(x, 2.5, y);
+    this.boom.distance = radius * 5;
+    this.boomPower = 120 + radius * 40;
+    this.boomTimer = 0.45;
   }
 
   /** Fogonazo de un disparo en (x, y). */

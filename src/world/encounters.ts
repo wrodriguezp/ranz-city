@@ -17,7 +17,19 @@ import { dangerAt, edgeMidpoint, exitNodes, shortestPath, type ZoneMap } from '.
 export interface ZombieSpawn {
   x: number;
   y: number;
-  kind: 'walker' | 'tank';
+  kind: 'walker' | 'runner' | 'bloater' | 'screamer' | 'tank';
+}
+
+/**
+ * Qué infectado común sale en un punto. Los especiales son más probables en zonas peligrosas.
+ * (Se elige al planear, con la seed: la misma ciudad tiene siempre a los mismos en el mismo lugar).
+ */
+function commonKind(danger: number, rng: Rng): ZombieSpawn['kind'] {
+  const r = rng.float();
+  if (r < 0.08 + 0.1 * danger) return 'runner';
+  if (r < 0.12 + 0.15 * danger) return 'bloater';
+  if (r < 0.14 + 0.18 * danger) return 'screamer';
+  return 'walker';
 }
 
 /** Un tramo de una ruta: los dos cruces que une (útil para el mapa y para depurar). */
@@ -64,8 +76,9 @@ export function planEncounters(
     for (let x = 0; x < grid.width; x++) {
       if (!walkable(x, y)) continue;
       if (Math.hypot(x + 0.5 - spawn.x, y + 0.5 - spawn.y) < SAFE_RADIUS) continue;
-      const density = BASE_DENSITY + DANGER_DENSITY * dangerAt(zones, x + 0.5, y + 0.5);
-      if (rng.chance(density)) zombies.push({ x: x + 0.5, y: y + 0.5, kind: 'walker' });
+      const danger = dangerAt(zones, x + 0.5, y + 0.5);
+      const density = BASE_DENSITY + DANGER_DENSITY * danger;
+      if (rng.chance(density)) zombies.push({ x: x + 0.5, y: y + 0.5, kind: commonKind(danger, rng) });
     }
   }
 

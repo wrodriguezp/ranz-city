@@ -5,13 +5,22 @@
 // Así se puede serializar con JSON: guardar la partida, o en el futuro multijugador, que el host
 // mande este estado a los demás jugadores.
 
-import type { WeaponState } from './combat';
+import type { WeaponId, WeaponState } from './combat';
 import type { EscapeState } from './escape';
 import type { FlashlightState } from './flashlight';
 import type { LootState } from './loot';
 import type { PlayerState } from './player';
 
-export type ZombieKind = 'walker' | 'tank';
+/**
+ * Tipos de infectado:
+ *  walker   el común: lento, en grupo es peligroso
+ *  runner   corredor: rápido y frágil, castiga quedarse quieto
+ *  bloater  hinchado: lento y duro; al morir REVIENTA y daña a todo lo que esté cerca
+ *           (zombies incluidos: matarlo en medio de una horda es una buena idea)
+ *  screamer gritón: si te ve, grita y llama a una horda; conviene matarlo primero
+ *  tank     el jefe del paso obligado: embiste y lanza escombros
+ */
+export type ZombieKind = 'walker' | 'runner' | 'bloater' | 'screamer' | 'tank';
 
 /**
  * Máquina de estados de un zombie:
@@ -22,8 +31,9 @@ export type ZombieKind = 'walker' | 'tank';
  *  return      (tanque) vuelve a su puesto tras perder al jugador
  *  charge      (tanque) embestida en línea recta
  *  stunned     aturdido después de embestir
+ *  throw       (tanque) preparando el lanzamiento de un escombro
  */
-export type ZombieMode = 'idle' | 'wander' | 'investigate' | 'chase' | 'return' | 'charge' | 'stunned';
+export type ZombieMode = 'idle' | 'wander' | 'investigate' | 'chase' | 'return' | 'charge' | 'stunned' | 'throw';
 
 export interface Zombie {
   id: number;
@@ -62,6 +72,32 @@ export interface Zombie {
   hordeUntil: number;
   homeX: number;
   homeY: number;
+  /**
+   * Altura sobre el suelo (tiles) y velocidad vertical: una explosión o la embestida del tanque
+   * lo LANZA por el aire. El mundo sigue siendo 2D; la altura es un dato más, como el empujón.
+   */
+  air: number;
+  airV: number;
+  /** Enfriamiento de la habilidad especial (grito, lanzamiento del tanque). */
+  ability: number;
+}
+
+/**
+ * Algo que vuela: una granada del jugador o un escombro del tanque. Se mueve en 2D por la
+ * grilla (rebota contra las paredes) y tiene una altura z con gravedad, solo para el arco.
+ */
+export interface Projectile {
+  kind: 'grenade' | 'rock';
+  x: number;
+  y: number;
+  z: number;
+  vx: number;
+  vy: number;
+  vz: number;
+  /** Segundos hasta explotar (la granada); la roca revienta al tocar el suelo. */
+  fuse: number;
+  /** ¿Ya tocó el suelo una vez? (el primer rebote hace ruido). */
+  landed: boolean;
 }
 
 export interface Corpse {
@@ -74,7 +110,17 @@ export interface Corpse {
 /** Sucesos de un paso, para que el render y el HUD reaccionen (efectos, mensajes). No se guardan. */
 export type GameEvent =
   /** hit: qué paró la bala, para chispas en la pared o sangre en el zombie. */
-  | { type: 'shot'; fromX: number; fromY: number; toX: number; toY: number; hit: 'zombie' | 'wall' | 'none' }
+  | {
+      type: 'shot';
+      fromX: number;
+      fromY: number;
+      toX: number;
+      toY: number;
+      hit: 'zombie' | 'wall' | 'none';
+      weapon: WeaponId;
+      /** Primer perdigón de un disparo (para que la escopeta suene una vez y no nueve). */
+      first: boolean;
+    }
   | { type: 'swing'; x: number; y: number; facing: number }
   | { type: 'blood'; x: number; y: number }
   /**
@@ -96,6 +142,8 @@ export type GameEvent =
     }
   | { type: 'hurt'; damage: number }
   | { type: 'alarm'; x: number; y: number }
+  | { type: 'explosion'; x: number; y: number; radius: number; kind: 'grenade' | 'barrel' | 'bloater' | 'rock' }
+  | { type: 'barrel'; id: number }
   /** Sonidos sueltos: la lógica solo avisa QUÉ sonó y DÓNDE; el audio decide cómo suena. */
   | { type: 'sfx'; name: SfxName; x: number; y: number }
   | { type: 'message'; text: string; tone?: 'info' | 'danger' | 'good' };
@@ -104,6 +152,7 @@ export interface Inventory {
   medkits: number;
   /** Baterías de repuesto para la linterna. */
   batteries: number;
+  grenades: number;
 }
 
 export interface GameStats {
@@ -128,6 +177,11 @@ export interface GameState {
   escape: EscapeState;
   zombies: Zombie[];
   nextZombieId: number;
+  projectiles: Projectile[];
+  /** barrels[id] = true si ese barril (city.barrels) ya explotó. */
+  barrelsBlown: boolean[];
+  /** Explosiones a punto de salir (cadenas de barriles, hinchados): ver explosives.ts. */
+  pendingBlasts: { x: number; y: number; kind: 'grenade' | 'barrel' | 'bloater' | 'rock'; delay: number }[];
   corpses: Corpse[];
   /** Segundos hasta la próxima horda. */
   hordeTimer: number;
@@ -149,4 +203,9 @@ export type SfxName =
   | 'horde'
   | 'helicopter'
   | 'medkit'
-  | 'battery';
+  | 'battery'
+  | 'throw'
+  | 'bounce'
+  | 'scream'
+  | 'weapon'
+  | 'switch';

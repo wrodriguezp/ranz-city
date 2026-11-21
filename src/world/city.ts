@@ -9,7 +9,7 @@ import { planEncounters, type EncounterPlan } from './encounters';
 import { hashString, Rng } from './rng';
 import { buildTileGrid, nodeCenter, type TileGrid } from './tileGrid';
 import { planEvacuation, type EvacPoint } from './evacuation';
-import { placeProps, type Container } from './props';
+import { placeBarrels, placeProps, type Barrel, type Container } from './props';
 import { computeZones, type ZoneMap } from './zones';
 
 export interface City {
@@ -26,6 +26,7 @@ export interface City {
   zones: ZoneMap;
   /** Autos, cajas y cuerpos con su loot. */
   props: Container[];
+  barrels: Barrel[];
   /** Zonas de evacuación con su hora límite. */
   evac: EvacPoint[];
   /** Huella de la ciudad generada, para comprobar a simple vista que la generación es determinista. */
@@ -54,11 +55,12 @@ export function generateCity(seedText: string): City {
   // Los props van antes que los zombies: estampan autos y cajas en la grilla, y así nadie
   // aparece adentro de un auto.
   const props = placeProps(grid, layout, zones, spawn, rng.fork('props'));
+  const barrels = placeBarrels(grid, zones, spawn, rng.fork('barrels'));
   const encounters = planEncounters(grid, layout, zones, spawn, rng.fork('encounters'));
 
   const evac = planEvacuation(layout);
 
-  return { seedText, seed, layout, grid, spawn, encounters, zones, props, evac, fingerprint: fingerprintOf(grid) };
+  return { seedText, seed, layout, grid, spawn, encounters, zones, props, barrels, evac, fingerprint: fingerprintOf(grid) };
 }
 
 /** Hash FNV-1a de los tiles y las alturas de los edificios. */

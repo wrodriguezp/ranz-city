@@ -16,7 +16,8 @@ const CONTROLS = `
   <div class="controls">
     <div><b>WASD</b> moverse</div><div><b>Mouse</b> apuntar</div>
     <div><b>Clic</b> atacar</div><div><b>Clic der. / Espacio</b> golpe rápido</div>
-    <div><b>Q</b> cambiar arma (1 bate · 2 pistola)</div><div><b>R</b> recargar</div>
+    <div><b>Q</b> siguiente arma · <b>1-4</b> bate, pistola, escopeta, subfusil</div><div><b>R</b> recargar</div>
+    <div><b>G</b> lanzar granada (hacia el mouse)</div><div><b>Barriles rojos</b>: dispárales</div>
     <div><b>F</b> linterna</div><div><b>B</b> cambiar batería</div>
     <div><b>H</b> botiquín</div><div><b>E</b> (mantener) revisar autos, cajas y cuerpos</div>
     <div><b>Shift</b> (mantener) sigilo: lento y silencioso</div><div><b>Rueda</b> acercar / alejar</div>

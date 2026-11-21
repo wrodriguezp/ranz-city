@@ -60,6 +60,9 @@ export class EffectsView {
   private readonly swingGeometry = new THREE.RingGeometry(0.6, 1.9, 20, 1, -Math.PI / 3, (Math.PI * 2) / 3);
   private readonly tracerGeometry = new THREE.BoxGeometry(1, 1, 1);
   private readonly flashGeometry = new THREE.OctahedronGeometry(0.35);
+  private readonly fireGeometry = new THREE.IcosahedronGeometry(1, 1);
+  private readonly ringGeometry = new THREE.RingGeometry(0.85, 1, 40);
+  private readonly scorchGeometry = new THREE.CircleGeometry(1, 18);
   private readonly matrix = new THREE.Matrix4();
   private readonly quaternion = new THREE.Quaternion();
   private readonly euler = new THREE.Euler();
@@ -105,9 +108,12 @@ export class EffectsView {
     for (const event of events) {
       switch (event.type) {
         case 'shot':
-          this.tracer(event.fromX, event.fromY, event.toX, event.toY);
-          this.muzzleFlash(event.fromX, event.fromY);
-          this.lighting.flash(event.fromX, event.fromY);
+          this.tracer(event.fromX, event.fromY, event.toX, event.toY, event.weapon === 'pistol' ? 0.06 : 0.045);
+          // La escopeta son 9 perdigones, pero un solo fogonazo (más grande).
+          if (event.first) {
+            this.muzzleFlash(event.fromX, event.fromY, event.weapon === 'shotgun' ? 1.8 : 1);
+            this.lighting.flash(event.fromX, event.fromY);
+          }
           if (event.hit === 'wall') this.burst(event.toX, event.toY, 1.0, 8, 0xffc070, 6, false);
           break;
         case 'swing': {
@@ -130,6 +136,9 @@ export class EffectsView {
           break;
         case 'blood':
           this.decal(event.x, event.y, seedNoise, 1);
+          break;
+        case 'explosion':
+          this.explosion(event.x, event.y, event.radius, event.kind);
           break;
         default:
           break;
@@ -175,7 +184,7 @@ export class EffectsView {
    * Una trazadora es una caja muy fina y larga, estirada entre la boca del arma y el impacto.
    * (Las líneas de WebGL siempre miden 1 píxel de ancho: se veían como un pelo, "toscas").
    */
-  private tracer(fromX: number, fromY: number, toX: number, toY: number): void {
+  private tracer(fromX: number, fromY: number, toX: number, toY: number, width: number): void {
     const dx = toX - fromX;
     const dy = toY - fromY;
     const length = Math.hypot(dx, dy);
@@ -190,11 +199,11 @@ export class EffectsView {
     const mesh = new THREE.Mesh(this.tracerGeometry, material);
     mesh.position.set(fromX + dx / 2, 1.15, fromY + dy / 2);
     mesh.rotation.y = -Math.atan2(dy, dx);
-    mesh.scale.set(length, 0.06, 0.06);
+    mesh.scale.set(length, width, width);
     this.add(mesh, material, TRACER_LIFE, 1);
   }
 
-  private muzzleFlash(x: number, y: number): void {
+  private muzzleFlash(x: number, y: number, size: number): void {
     const material = new THREE.MeshBasicMaterial({
       color: 0xffe2a0,
       transparent: true,
@@ -205,6 +214,7 @@ export class EffectsView {
     const mesh = new THREE.Mesh(this.flashGeometry, material);
     mesh.position.set(x, 1.15, y);
     mesh.rotation.set(Math.random() * 3, Math.random() * 3, 0);
+    mesh.scale.setScalar(size);
     this.add(mesh, material, FLASH_LIFE, 1);
   }
 
@@ -229,6 +239,92 @@ export class EffectsView {
         event.gib ? 1.5 : 1.1,
       );
     }
+  }
+
+  /**
+   * Una explosión, en capas (cada una dura distinto, y eso la hace creíble):
+   *  - bola de fuego: esfera aditiva que crece rápido y se apaga en ~0.35 s;
+   *  - onda de choque: un anillo en el suelo que se abre hasta el radio de daño (así se LEE
+   *    hasta dónde llegó);
+   *  - chispas y escombros con física; una mancha negra que queda en el suelo;
+   *  - la luz: ilumina la cuadra un instante.
+   */
+  private explosion(x: number, y: number, radius: number, kind: string): void {
+    const bloater = kind === 'bloater';
+    const rock = kind === 'rock';
+    const fire = (color: number, size: number, life: number, grow: number, peak: number) => {
+      const material = new THREE.MeshBasicMaterial({ color, transparent: true, blending: THREE.AdditiveBlending, depthWrite: false });
+      const mesh = new THREE.Mesh(this.fireGeometry, material);
+      mesh.position.set(x, 0.9, y);
+      mesh.scale.setScalar(size);
+      this.add(mesh, material, life, peak, grow);
+    };
+    if (bloater) {
+      // El hinchado no es fuego: es una nube de bilis verde.
+      fire(0x7fae2a, radius * 0.45, 0.6, 2.2, 0.7);
+      this.burst(x, y, 1, 40, 0x9ccf3a, 9, true);
+      for (let i = 0; i < 16; i++) this.chunk(x, y, Math.cos(i), Math.sin(i), 9, false);
+    } else if (rock) {
+      for (let i = 0; i < 12; i++) this.debris(x, y, 6);
+      this.burst(x, y, 0.4, 14, 0xbfae90, 6, false);
+    } else {
+      fire(0xffffff, radius * 0.22, 0.12, 9, 1);
+      fire(0xff9a2a, radius * 0.35, 0.38, 3.2, 0.95);
+      fire(0xff4a10, radius * 0.5, 0.55, 1.6, 0.5);
+      this.burst(x, y, 1, 70, 0xffb040, 16, true);
+      this.burst(x, y, 1, 30, 0xfff0a0, 10, false);
+      for (let i = 0; i < 18; i++) this.debris(x, y, 11);
+      this.lighting.blast(x, y, radius);
+    }
+    // Onda de choque en el suelo.
+    const ringMaterial = new THREE.MeshBasicMaterial({
+      color: bloater ? 0xb4e05a : 0xffd8a0,
+      transparent: true,
+      depthWrite: false,
+      side: THREE.DoubleSide,
+      blending: THREE.AdditiveBlending,
+    });
+    const ring = new THREE.Mesh(this.ringGeometry, ringMaterial);
+    ring.rotation.x = -Math.PI / 2;
+    ring.position.set(x, 0.08, y);
+    ring.scale.setScalar(radius * 0.3);
+    // Crece de 0.3·radio a ~radio en su vida: e^(grow·life) ≈ 3.3.
+    this.add(ring, ringMaterial, 0.3, 0.8, 4);
+    // Mancha que queda: quemadura o charco verde.
+    if (!rock) {
+      const scorchMaterial = new THREE.MeshBasicMaterial({ color: bloater ? 0x2a3a10 : 0x050505, transparent: true, opacity: 0.75, depthWrite: false });
+      const scorch = new THREE.Mesh(this.scorchGeometry, scorchMaterial);
+      scorch.rotation.x = -Math.PI / 2;
+      scorch.position.set(x, 0.025, y);
+      scorch.scale.setScalar(radius * 0.55);
+      this.add(scorch, scorchMaterial, 40, 0.75);
+    }
+  }
+
+  /** Escombros grises (pavimento, metal del barril). */
+  private debris(x: number, y: number, power: number): void {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = power * (0.3 + Math.random() * 0.8);
+    const index = this.chunkNext % MAX_CHUNKS;
+    const p: Particle = {
+      x,
+      y,
+      z: 0.5,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      vz: 4 + Math.random() * 9,
+      life: 5 + Math.random() * 3,
+      maxLife: 8,
+      size: 0.12 + Math.random() * 0.2,
+      spin: (Math.random() - 0.5) * 24,
+      angle: Math.random() * 6,
+      sticky: true,
+    };
+    this.chunkData[index] = p;
+    const g = 0.2 + Math.random() * 0.2;
+    this.chunks.setColorAt(index, this.color.setRGB(g, g * 0.95, g * 0.9));
+    this.chunkNext++;
+    if (this.chunks.instanceColor) this.chunks.instanceColor.needsUpdate = true;
   }
 
   private chunk(x: number, y: number, dirX: number, dirY: number, power: number, tank: boolean): void {

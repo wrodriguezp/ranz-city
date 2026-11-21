@@ -10,6 +10,8 @@ import { moveCircle } from './collision';
 import { createEscape, updateEscape } from './escape';
 import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
+import { updateExplosives } from './explosives';
+import { Tile } from '../world/tileGrid';
 import { createFlashlight, updateFlashlight } from './flashlight';
 import { FlowField } from './flowField';
 import { createPlayer, PLAYER_MAX_HP, updatePlayer } from './player';
@@ -61,11 +63,14 @@ export function createGameState(city: City): GameState {
     player: createPlayer(city.spawn.x, city.spawn.y),
     flashlight: createFlashlight(),
     weapon: createWeapons(),
-    inventory: { medkits: 1, batteries: 1 },
+    inventory: { medkits: 1, batteries: 1, grenades: 1 },
     loot: createLoot(city.props.length),
     escape: createEscape(city.evac),
     zombies: [],
     nextZombieId: 0,
+    projectiles: [],
+    barrelsBlown: city.barrels.map(() => false),
+    pendingBlasts: [],
     corpses: [],
     hordeTimer: initialHordeTimer(),
     noiseHeat: 0,
@@ -73,6 +78,7 @@ export function createGameState(city: City): GameState {
     stats: { kills: 0, shots: 0, hordes: 0 },
     events: [],
   };
+  applyBarrels(city, state.barrelsBlown);
   for (const spawn of city.encounters.zombies) {
     const z = createZombie(state, spawn.x, spawn.y, spawn.kind);
     // Los grupos se reparten al azar: si alguno quedó rozando una pared, lo empujamos afuera.
@@ -98,6 +104,7 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   // El combate va antes que los zombies: lo que muere en este paso ya no ataca.
   updateCombat(state, rt, intent, dt);
   updateLoot(state, rt, intent.search, dt);
+  updateExplosives(state, rt, dt);
 
   rt.field.update(state.player.x, state.player.y);
   updateZombies(state, rt, dt);
@@ -108,6 +115,17 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   if (state.player.hp <= 0 && state.status === 'playing') {
     state.status = 'lost';
     state.events.push({ type: 'message', text: 'Te alcanzaron.', tone: 'danger' });
+  }
+}
+
+/**
+ * Los barriles son lo único del mundo estático que cambia durante la partida. La grilla guarda
+ * su versión "actual", y esta función la vuelve a armar desde el estado dinámico: al reiniciar
+ * (todos de vuelta) o, en el futuro, al cargar una partida o recibir el estado del host.
+ */
+export function applyBarrels(city: City, blown: readonly boolean[]): void {
+  for (const barrel of city.barrels) {
+    city.grid.tiles[barrel.y * city.grid.width + barrel.x] = blown[barrel.id] ? Tile.Sidewalk : Tile.Barrel;
   }
 }
 

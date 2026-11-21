@@ -3,6 +3,7 @@
 // Revisar lleva tiempo y te deja quieto: es una pequeña apuesta. Si te alcanzan mientras
 // buscas, la búsqueda se corta. Algunos autos tienen alarma: el botín sale caro.
 
+import { GUNS } from './combat';
 import type { Container, LootItem } from '../world/props';
 import type { GameState } from './state';
 import { makeNoise, type ZombieRuntime } from './zombies';
@@ -83,8 +84,33 @@ export function updateLoot(state: GameState, rt: ZombieRuntime, holding: boolean
 function give(state: GameState, item: LootItem): string {
   switch (item.type) {
     case 'ammo':
-      state.weapon.reserve += item.amount;
+      state.weapon.ammo.light += item.amount;
       return `${item.amount} balas`;
+    case 'shells':
+      state.weapon.ammo.shells += item.amount;
+      return item.amount > 1 ? `${item.amount} cartuchos` : 'un cartucho';
+    case 'grenade':
+      state.inventory.grenades += item.amount;
+      return item.amount > 1 ? `${item.amount} granadas` : 'una granada';
+    case 'shotgun':
+    case 'smg': {
+      const weapon = state.weapon;
+      const name = item.type === 'shotgun' ? 'una ESCOPETA' : 'un SUBFUSIL';
+      if (weapon.owned[item.type]) {
+        // Repetida: se desarma para sacarle la munición.
+        const extra = item.type === 'shotgun' ? 6 : 30;
+        if (item.type === 'shotgun') weapon.ammo.shells += extra;
+        else weapon.ammo.light += extra;
+        return `${name} (ya tenías: +${extra} ${item.type === 'shotgun' ? 'cartuchos' : 'balas'})`;
+      }
+      weapon.owned[item.type] = true;
+      // Viene cargada, y la tomas en la mano: es lo más emocionante que puede salir.
+      weapon.mags[item.type] = GUNS[item.type].mag;
+      weapon.current = item.type;
+      weapon.reloadTimer = 0;
+      state.events.push({ type: 'sfx', name: 'weapon', x: state.player.x, y: state.player.y });
+      return `${name} [${item.type === 'shotgun' ? 3 : 4}]`;
+    }
     case 'medkit':
       state.inventory.medkits += item.amount;
       return item.amount > 1 ? `${item.amount} botiquines` : 'un botiquín';

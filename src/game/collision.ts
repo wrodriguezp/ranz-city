@@ -13,7 +13,14 @@ import { Tile, tileAt, type TileGrid } from '../world/tileGrid';
 export function isSolid(grid: TileGrid, tx: number, ty: number): boolean {
   const tile = tileAt(grid, tx, ty);
   // Fuera del mapa cuenta como sólido: es el muro perimetral.
-  return tile === undefined || tile === Tile.Building || tile === Tile.Barricade || tile === Tile.Car || tile === Tile.Crate;
+  return (
+    tile === undefined ||
+    tile === Tile.Building ||
+    tile === Tile.Barricade ||
+    tile === Tile.Car ||
+    tile === Tile.Crate ||
+    tile === Tile.Barrel
+  );
 }
 
 /** Mueve un círculo (x, y, radio r) en (dx, dy) respetando los tiles sólidos. */
