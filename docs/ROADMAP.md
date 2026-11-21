@@ -1,4 +1,4 @@
-# Hoja de ruta (después del hito 10)
+# Hoja de ruta (hitos 11 a 15 y lo que sigue)
 
 Acordado con Wilbert tras probar el hito 10. Orden: primero arreglar lo que está roto, después sumar.
 Lo que más le gusta: la variedad de edificios y escenarios.
@@ -76,6 +76,15 @@ y sonidos propios, y el tanque se sentía tonto y lento.
   jugador articulado.
 - **Primera persona** (15f, experimental): tecla P. Solo cambia la cámara y el input; la simulación es la misma.
 - **Pendiente**: agrandar la plaza de la defensa si sigue sintiéndose chica.
+
+## Pendiente tras cerrar el v0
+Feedback de Wilbert al terminar el prototipo:
+- **El clímax no termina**: siguen llegando zombies desde el otro lado de la ciudad y, con calles angostas, 30
+  zombies alrededor frustran más de lo que tensan. A veces hay que retroceder hasta el inicio.
+- **Disparar no satisface**: hacen falta muchas balas por zombie y falta impacto (la escopeta debería hacerlos
+  volar, como en L4D2).
+- **El cuerpo a cuerpo se siente flojo**: falta que los golpes desarmen a los zombies de forma visible.
+- **Siguiente gran paso**: multijugador cooperativo en web y quizás un mapa más grande.
 
 ## Para más adelante
 - Crescendos: eventos que tú disparas (una alarma, abrir una reja) y que traen una horda a cambio de algo.

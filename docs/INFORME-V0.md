@@ -1,8 +1,9 @@
-# Zombie City: informe final del prototipo v0
+# RanZ City: informe final del prototipo v0
 
 Un shooter de zombies en 3D que corre en el navegador. Fue hecho en dos días (20 y 21 de noviembre de 2026) por
 Wilbert Rodríguez trabajando con Claude Code (un agente de programación con IA) como programador. Este
-documento cuenta qué se hizo, por qué y cómo, para quien quiera escribir sobre el proyecto.
+documento cuenta qué se hizo, por qué y cómo. Durante el desarrollo se llamó *Zombie City*; al publicarlo pasó a
+llamarse **RanZ City** (random + Z).
 
 ## En una frase
 Una ciudad de noche, distinta en cada partida, con hordas de zombies, una linterna que apenas alcanza y un
@@ -107,17 +108,9 @@ La respuesta fue sí.
 - Se evaluó migrar a Godot y se decidió quedarse en web: es más fácil de compartir (un link) y el prototipo
   demostró que el navegador aguanta.
 
-## Para quien escriba sobre esto: ángulos posibles
-- **Un juego en dos días con una IA como programador**, con un humano dirigiendo el diseño y probando la
-  sensación. La IA no decidió qué era divertido: lo decidió Wilbert jugando.
-- **El prototipo como pregunta**: no se buscó un juego bonito sino uno divertido, con cajas y cilindros.
-  La primera persona salió como experimento al final y terminó siendo lo que más le gustó.
-- **Feedback en lenguaje natural → código**: cómo un «el tanque se siente tonto» se convierte en un tanque
-  que salta, aplasta y te lanza zombies.
-- **Lo técnico explicado simple**: campos de flujo para hordas, BFS para no encerrar al jugador, instancing
-  para animar cientos de zombies.
-
 ## Cómo jugarlo
+En línea: [ranzcity.wrodriguez.dev](https://ranzcity.wrodriguez.dev) (con `?seed=` se repite una ciudad).
+En local:
 ```
 npm install
 npm run dev
