@@ -10,6 +10,7 @@ import type { EscapeState } from './escape';
 import type { FlashlightState } from './flashlight';
 import type { LootState } from './loot';
 import type { PlayerState } from './player';
+import type { Weather } from '../world/weather';
 import type { LootItem } from '../world/props';
 
 /**
@@ -253,6 +254,8 @@ export interface GameState {
   tick: number;
   /** Estado del PRNG dinámico (ver random.ts). */
   rng: number;
+  /** Clima de la noche (viene de la seed; se copia aquí porque cambia el oído y la vista). */
+  weather: Weather;
   player: PlayerState;
   flashlight: FlashlightState;
   weapon: WeaponState;

@@ -22,6 +22,7 @@
 
 import type { City } from '../world/city';
 import { lightAt } from '../world/streetLights';
+import { WEATHER_EFFECTS } from '../world/weather';
 import { isSolid, moveCircle } from './collision';
 import { queueBlast, throwAcid, throwRock } from './explosives';
 import { flashlightPower } from './flashlight';
@@ -201,9 +202,11 @@ export function makeNoise(state: GameState, x: number, y: number, radius: number
     state.lastNoise = { x, y, time: state.time };
     rt?.noiseField.update(x, y);
   }
+  // La lluvia tapa los ruidos: se oyen a menos distancia.
+  const heard = radius * WEATHER_EFFECTS[state.weather].hearing;
   for (const z of state.zombies) {
     // El tanque está "de guardia": oye menos.
-    const r = z.kind === 'tank' ? radius * 0.6 : radius;
+    const r = z.kind === 'tank' ? heard * 0.6 : heard;
     const d = Math.hypot(z.x - x, z.y - y);
     if (d > r || z.mode === 'charge' || z.mode === 'stunned' || z.mode === 'throw') continue;
     // El que te persigue no se distrae con un ruido.
@@ -340,9 +343,11 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
   const zombies = state.zombies;
   rt.hash.rebuild(zombies);
   const light = flashlightPower(state.flashlight, state.time);
-  const sight = SIGHT_DARK + (SIGHT_LIT - SIGHT_DARK) * light;
+  // La niebla (y algo la lluvia) acorta la vista de todos.
+  const weatherSight = WEATHER_EFFECTS[state.weather].sight;
+  const sight = (SIGHT_DARK + (SIGHT_LIT - SIGHT_DARK) * light) * weatherSight;
   // Luz de los faroles donde estás parado: bajo un farol te ven aunque tengas la linterna apagada.
-  const lampSight = SIGHT_LAMP * lightAt(rt.city.lights, player.x, player.y, state.time);
+  const lampSight = SIGHT_LAMP * lightAt(rt.city.lights, player.x, player.y, state.time) * weatherSight;
   const playerVX = (player.x - player.prevX) / dt;
   const playerVY = (player.y - player.prevY) / dt;
   const flow = { x: 0, y: 0 };

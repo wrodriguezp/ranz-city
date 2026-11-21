@@ -20,6 +20,8 @@ import { exitName } from './game/escape';
 import { EvacView } from './render/evacView';
 import { Screens } from './ui/screens';
 import { clockText } from './world/evacuation';
+import { WEATHER_EFFECTS } from './world/weather';
+import { WeatherView } from './render/weatherView';
 import { MapView, type ExitMarker } from './ui/mapView';
 import { GameCamera } from './render/gameCamera';
 import { NightLighting } from './render/lighting';
@@ -78,6 +80,7 @@ const hud = document.getElementById('hud')!;
 let city: City;
 let cityView: CityView | undefined;
 let streetLightView: StreetLightView | undefined;
+let weatherView: WeatherView | undefined;
 let state: GameState;
 let runtime: Runtime;
 /** Posición y orientación del jugador en el paso anterior, para interpolar al dibujar. */
@@ -153,6 +156,13 @@ function loadCity(seedText: string): void {
   }
   streetLightView = new StreetLightView(city.lights);
   scene.add(streetLightView.root);
+  if (weatherView) {
+    scene.remove(weatherView.root);
+    weatherView.dispose();
+  }
+  weatherView = new WeatherView(scene, city.weather);
+  weatherView.setActive(mode === 'play');
+  scene.add(weatherView.root);
 
   startGame();
   resetReviewCamera();
@@ -220,6 +230,7 @@ function setMode(next: Mode): void {
   reviewControls.enabled = mode === 'review';
   lighting.setDaylight(mode === 'review');
   setStreetLightIntensity(mode === 'review' ? 0 : 1.5);
+  weatherView?.setActive(mode === 'play');
 }
 
 // --- Lógica (paso fijo) ---------------------------------------------------------------------
@@ -334,6 +345,7 @@ function frame(now: number): void {
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
     cityView?.update(now / 1000, x, y);
+    weatherView?.update(x, y, now / 1000);
     // Los eventos de los pasos de este cuadro: efectos y mensajes, y después se descartan.
     const axes = gameCamera.screenAxesOnGround();
     const listener = { x, y, rightX: axes.rightX, rightY: axes.rightY };
@@ -415,7 +427,7 @@ function escapeHtml(text: string): string {
 
 let lastHud = '';
 function updateHud(): void {
-  const seed = `seed: <b>${escapeHtml(city.seedText)}</b>  (huella ${city.fingerprint})`;
+  const seed = `seed: <b>${escapeHtml(city.seedText)}</b>  (huella ${city.fingerprint}) · ${city.weather}`;
   let text: string;
   if (mode === 'play') {
     const light = state.flashlight;
@@ -505,6 +517,7 @@ function summary() {
   const via = state.escape.escapedVia;
   return {
     seed: city.seedText,
+    weather: WEATHER_EFFECTS[city.weather].label,
     time: `${Math.floor(t / 60)}:${String(t % 60).padStart(2, '0')}`,
     clock: clockText(state.time),
     kills: state.stats.kills,

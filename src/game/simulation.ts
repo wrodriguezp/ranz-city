@@ -74,6 +74,7 @@ export function createGameState(city: City): GameState {
     tick: 0,
     // El azar dinámico también parte de la seed: misma seed y mismas acciones, misma partida.
     rng: (city.seed ^ 0x9e3779b9) >>> 0,
+    weather: city.weather,
     player: createPlayer(city.spawn.x, city.spawn.y),
     flashlight: createFlashlight(),
     weapon: createWeapons(),

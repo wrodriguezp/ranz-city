@@ -5,6 +5,8 @@ export type ScreenKind = 'intro' | 'pause' | 'won' | 'lost' | null;
 
 export interface RunSummary {
   seed: string;
+  /** Clima de la noche, para contárselo al jugador. */
+  weather?: string;
   time: string;
   clock: string;
   kills: number;
@@ -40,7 +42,8 @@ export class Screens {
     this.root.style.display = kind ? '' : 'none';
     if (!kind) return;
     this.root.className = kind;
-    const seedLine = summary ? `<div class="seed">seed <b>${escapeHtml(summary.seed)}</b></div>` : '';
+    const weather = summary?.weather ? ` · ${escapeHtml(summary.weather)}` : '';
+    const seedLine = summary ? `<div class="seed">seed <b>${escapeHtml(summary.seed)}</b>${weather}</div>` : '';
     switch (kind) {
       case 'intro':
         this.root.innerHTML = `
