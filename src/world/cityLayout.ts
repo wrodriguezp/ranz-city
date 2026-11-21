@@ -1,7 +1,7 @@
 // Diseño de la ciudad a nivel de grafo: dónde empieza el jugador, dónde están las salidas
 // y qué calles quedan cortadas. Todavía no hay tiles ni geometría: eso viene después.
 
-import { CityGraph } from './cityGraph';
+import { CityGraph, type Edge } from './cityGraph';
 import type { Rng } from './rng';
 
 export type ExitKind = 'helicopter' | 'road';
@@ -14,6 +14,12 @@ export interface Exit {
   block?: { bx: number; by: number };
   /** Distancia en tramos desde el inicio, ya con las calles cortadas. */
   distance: number;
+  /**
+   * Por dónde llegan las oleadas en la defensa final (vector unitario desde la salida hacia
+   * afuera). Plaza: el lado de la ÚNICA entrada de la valla. Camión: la única calle que queda
+   * abierta hacia su cruce (las otras se cortan, ver el paso 3b).
+   */
+  funnel: { dx: number; dy: number };
 }
 
 /**
@@ -126,6 +132,34 @@ export function generateLayout(rng: Rng, options: LayoutOptions): CityLayout {
     }
   }
 
+  // 3b. Embudo de los camiones: cada salida por carretera queda al fondo de un callejón, con
+  //     UNA sola calle de acceso (la que lleva más rápido al inicio). Las otras se cortan,
+  //     siempre que la ciudad siga conectada. Así, en la defensa final, la horda llega por un
+  //     solo lado y tiene sentido pararse a vaciar el cargador.
+  const roadFunnels = new Map<number, { dx: number; dy: number }>();
+  const roadDistances = graph.bfs(startNode);
+  for (const node of [roadEast, roadSide]) {
+    const other = (e: Edge) => (e.a === node ? e.b : e.a);
+    const incident = graph.edges
+      .filter((e) => (e.a === node || e.b === node) && !graph.blocked[e.id])
+      .sort((p, q) => roadDistances[other(p)] - roadDistances[other(q)] || p.id - q.id);
+    for (const edge of incident.slice(1)) {
+      if (protectedEdges.has(edge.id)) continue;
+      graph.blocked[edge.id] = true;
+      if (graph.isFullyConnected(startNode)) cutCount++;
+      else graph.blocked[edge.id] = false;
+    }
+    const next = other(incident[0]);
+    roadFunnels.set(node, { dx: graph.nodeX(next) - graph.nodeX(node), dy: graph.nodeY(next) - graph.nodeY(node) });
+  }
+  // La entrada de la valla de la plaza: un lado al azar (norte, sur, oeste o este).
+  const plazaFunnel = rng.fork('plaza-gap').pick([
+    { dx: 0, dy: -1 },
+    { dx: 0, dy: 1 },
+    { dx: -1, dy: 0 },
+    { dx: 1, dy: 0 },
+  ]);
+
   // 4. Distancias finales: sirven para mostrar qué tan lejos está cada salida
   //    y, más adelante, para subir la dificultad por zonas.
   const distanceFromStart = graph.bfs(startNode);
@@ -134,9 +168,9 @@ export function generateLayout(rng: Rng, options: LayoutOptions): CityLayout {
   );
 
   const exits: Exit[] = [
-    { kind: 'helicopter', block: plaza, distance: plazaDistance },
-    { kind: 'road', node: roadEast, distance: distanceFromStart[roadEast] },
-    { kind: 'road', node: roadSide, distance: distanceFromStart[roadSide] },
+    { kind: 'helicopter', block: plaza, distance: plazaDistance, funnel: plazaFunnel },
+    { kind: 'road', node: roadEast, distance: distanceFromStart[roadEast], funnel: roadFunnels.get(roadEast)! },
+    { kind: 'road', node: roadSide, distance: distanceFromStart[roadSide], funnel: roadFunnels.get(roadSide)! },
   ];
 
   return { graph, canal, startNode, exits, distanceFromStart, cutCount };

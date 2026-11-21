@@ -59,8 +59,8 @@ export class PropsView {
     const crateMesh = this.instanced(crateGeometry, this.material(new THREE.MeshStandardMaterial({ roughness: 0.85 })), crates.length);
     crates.forEach((c, i) => {
       crateMesh.setMatrixAt(i, this.compose(c.x + 0.5, 0.15, c.y + 0.5, c.angle));
-      // Militar (oliva), médica (blanca) o común (madera).
-      crateMesh.setColorAt(i, new THREE.Color(c.variant === 1 ? 0x4b5a32 : c.variant === 2 ? 0xd8d8d8 : 0x8a6a3e));
+      // Militar (oliva), médica (blanca), común (madera) o munición de una salida (verde vivo).
+      crateMesh.setColorAt(i, new THREE.Color(c.refill ? 0x2f9a4a : c.variant === 1 ? 0x4b5a32 : c.variant === 2 ? 0xd8d8d8 : 0x8a6a3e));
     });
 
     // Cuerpos: una cápsula acostada.

@@ -92,6 +92,12 @@ export interface Zombie {
    * o a la zona donde te oyeron, y peina el área hasta que se le acaba el tiempo.
    */
   hordeUntil: number;
+  /**
+   * Hasta cuándo te CAZA: sabe dónde estás aunque no te vea (va por el campo de flujo hacia ti)
+   * y no se distrae con ruidos. Lo usan las oleadas de la defensa final y los especiales
+   * enfurecidos (el tanque que te vio, la sonámbula despierta).
+   */
+  huntUntil: number;
   homeX: number;
   homeY: number;
   /**
@@ -100,6 +106,8 @@ export interface Zombie {
    */
   air: number;
   airV: number;
+  /** Viene en una oleada de la defensa final (no suelta loot: para eso está la caja de munición). */
+  wave?: boolean;
   /** Soldado del retén militar (más vida; casco y chaleco al dibujarlo). */
   armored?: boolean;
   /** Enfriamiento de la habilidad especial (grito, lanzamiento del tanque). */

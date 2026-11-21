@@ -16,7 +16,7 @@ import { PropsView } from './render/propsView';
 import { ExplosivesView } from './render/explosivesView';
 import { HazardsView } from './render/hazardsView';
 import { searchPrompt } from './game/loot';
-import { exitName } from './game/escape';
+import { escapePrompt, exitName } from './game/escape';
 import { EvacView } from './render/evacView';
 import { Screens } from './ui/screens';
 import { clockText } from './world/evacuation';
@@ -365,7 +365,8 @@ function frame(now: number): void {
     gameHud.update(state, now / 1000, lightAt(city.lights, state.player.x, state.player.y, state.time));
     damageText.update(gameCamera.camera, now / 1000);
     propsView?.update(state, now / 1000);
-    const prompt = searchPrompt(state, city.props);
+    const radio = escapePrompt(state, city.evac);
+    const prompt = radio.text ? radio : searchPrompt(state, city.props);
     gameHud.setPrompt(prompt.text, prompt.progress);
     mapView?.update(state, frameDt, exitMarkers());
     evacView?.update(state, frameDt, now / 1000);
@@ -500,7 +501,13 @@ window.addEventListener('keydown', (event) => {
 function exitMarkers(): ExitMarker[] {
   return city.evac.map((point) => ({
     label: point.kind === 'helicopter' ? 'Helicóptero' : 'Carretera',
-    detail: state.escape.departed[point.index] ? 'se fue' : point.deadline === null ? 'espera' : clockText(point.deadline),
+    detail: state.escape.departed[point.index]
+      ? 'se fue'
+      : state.escape.defense?.exit === point.index
+        ? 'defendiendo'
+        : point.deadline === null
+          ? 'espera'
+          : clockText(point.deadline),
     closed: state.escape.departed[point.index],
   }));
 }
@@ -523,7 +530,7 @@ document.getElementById('screen')!.addEventListener('pointerdown', (event) => {
  */
 function musicMood(x: number, y: number): MusicMood {
   if (state.status !== 'playing') return 'explore';
-  if (state.escape.finale || state.escape.progress.some((p) => p > 0)) return 'escape';
+  if (state.escape.defense || state.escape.progress.some((p) => p > 0)) return 'escape';
   let chasing = 0;
   for (const z of state.zombies) if (z.mode === 'chase' && Math.abs(z.x - x) < 25 && Math.abs(z.y - y) < 25) chasing++;
   if (chasing >= 8) return 'horde';
@@ -549,6 +556,15 @@ function evacLines(): { text: string; tone: 'open' | 'soon' | 'closed' | 'always
   return city.evac.map((point) => {
     const name = point.kind === 'helicopter' ? 'Helicóptero' : 'Carretera';
     if (state.escape.departed[point.index]) return { text: `${name} · se fue`, tone: 'closed' };
+    const defense = state.escape.defense;
+    if (defense?.exit === point.index) {
+      if (defense.ready) return { text: `${name} · <b>¡SUBE!</b>`, tone: 'soon' };
+      const left = Math.max(0, Math.ceil(defense.timer));
+      return {
+        text: `${name} · llega en <b>${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}</b> <span class="dim">· oleada ${defense.wave}</span>`,
+        tone: 'soon',
+      };
+    }
     if (point.deadline === null) return { text: `${name} · espera`, tone: 'always' };
     const left = Math.max(0, point.deadline - state.time);
     const m = Math.floor(left / 60);

@@ -153,6 +153,7 @@ export function createZombie(state: GameState, x: number, y: number, kind: Zombi
     stagger: 0,
     hitFlash: 0,
     hordeUntil: 0,
+    huntUntil: 0,
     homeX: x,
     homeY: y,
     air: 0,
@@ -203,14 +204,17 @@ export function makeNoise(state: GameState, x: number, y: number, radius: number
     rt?.noiseField.update(x, y);
   }
   // La lluvia tapa los ruidos: se oyen a menos distancia.
-  const heard = radius * WEATHER_EFFECTS[state.weather].hearing;
+  let heard = radius * WEATHER_EFFECTS[state.weather].hearing;
+  // Durante la defensa final, el rotor (o el motor del camión) tapa los disparos: la ciudad no
+  // se te viene encima por todos lados, solo llegan las oleadas por el embudo.
+  if (state.escape.defense) heard = Math.min(heard, DEFENSE_HEARING);
   for (const z of state.zombies) {
     // El tanque está "de guardia": oye menos.
     const r = z.kind === 'tank' ? heard * 0.6 : heard;
     const d = Math.hypot(z.x - x, z.y - y);
     if (d > r || z.mode === 'charge' || z.mode === 'stunned' || z.mode === 'throw') continue;
-    // El que te persigue no se distrae con un ruido.
-    if (z.mode === 'chase' && (z.seesPlayer || state.time - z.lastSeenAt < 3)) continue;
+    // El que te persigue (o te caza) no se distrae con un ruido.
+    if (z.mode === 'chase' && (z.seesPlayer || state.time - z.lastSeenAt < 3 || state.time < z.huntUntil)) continue;
     // El acechador espera en su cruce: solo un ruido cercano lo saca de ahí.
     if (z.role === 'ambusher' && z.mode === 'idle' && d > AMBUSH_HEAR) continue;
     z.mode = 'investigate';
@@ -281,7 +285,7 @@ export function damageZombie(
   // El fuego no le dice nada de dónde estás.
   if (z.mode !== 'charge' && z.mode !== 'stunned' && z.mode !== 'throw' && !options.burn) {
     const d = Math.hypot(state.player.x - z.x, state.player.y - z.y);
-    if (d < 12 || z.seesPlayer) {
+    if (d < 12 || z.seesPlayer || state.time < z.huntUntil) {
       z.mode = 'chase';
       z.lastSeenAt = state.time;
     } else {
@@ -667,7 +671,9 @@ function think(
   switch (z.mode) {
     case 'chase': {
       // Si te perdió de vista, va a la última posición donde te vio y busca por ahí.
-      if (!z.seesPlayer && state.time - z.lastSeenAt > LOSE_INTEREST) {
+      // (Salvo que te esté cazando: entonces sigue el campo de flujo hacia ti.)
+      const stalking = state.time < z.huntUntil;
+      if (!z.seesPlayer && state.time - z.lastSeenAt > LOSE_INTEREST && !stalking) {
         z.mode = 'investigate';
         z.timer = 6;
       }
@@ -690,7 +696,7 @@ function think(
           state.events.push({ type: 'message', text: '¡El tanque arranca un trozo de calle!', tone: 'danger' });
         }
         // Si te alejas mucho, vuelve a su puesto a vigilar.
-        if (!z.seesPlayer && dist > 30 && state.time - z.lastSeenAt > 8) z.mode = 'return';
+        if (!z.seesPlayer && !stalking && dist > 30 && state.time - z.lastSeenAt > 8) z.mode = 'return';
       }
       break;
     }
@@ -892,6 +898,8 @@ function turnToward(current: number, target: number, maxStep: number): number {
 export function updateHordes(state: GameState, rt: ZombieRuntime, dt: number, danger: number): void {
   state.hordeTimer -= dt;
   state.noiseHeat = Math.max(0, state.noiseHeat - 0.25 * dt);
+  // Durante la defensa final no hay hordas al azar: ya vienen las oleadas.
+  if (state.escape.defense) return;
 
   const byNoise = state.noiseHeat >= HORDE_HEAT_LIMIT;
   if (state.hordeTimer > 0 && !byNoise) return;
@@ -953,4 +961,79 @@ export function spawnHorde(state: GameState, rt: ZombieRuntime, size: number): b
     return placed > 0;
   }
   return false;
+}
+
+// --- Oleadas de la defensa final ------------------------------------------------------------
+
+export interface WaveOrigin {
+  /** Centro de la salida que se defiende. */
+  x: number;
+  y: number;
+  /** Lado del embudo (vector unitario): las oleadas aparecen de ese lado. */
+  dx: number;
+  dy: number;
+}
+
+/**
+ * Una oleada de la defensa final. A diferencia de una horda normal, esta SABE dónde estás (la
+ * radio y el ruido del vehículo los atrajeron): te cazan por el campo de flujo. Aparecen fuera de
+ * tu vista y del lado del embudo, así llegan todos por la misma calle o por la entrada de la valla.
+ * wave: número de oleada (0, 1, 2...): con cada una hay más corredores y especiales.
+ */
+export function spawnWave(state: GameState, rt: ZombieRuntime, origin: WaveOrigin, size: number, wave: number, tank = false): number {
+  const { grid } = rt.city;
+  const count = Math.min(size, MAX_ZOMBIES - state.zombies.length);
+  if (count <= 0 && !tank) return 0;
+  // Tres intentos cada vez más permisivos: del lado del embudo y lejos; de cualquier lado; más cerca.
+  const tries: [number, number, boolean][] = [
+    [22, 38, true],
+    [22, 38, false],
+    [14, 50, false],
+  ];
+  for (const [near, far, sided] of tries) {
+    for (let attempt = 0; attempt < 300; attempt++) {
+      const x = Math.floor(random(state) * grid.width) + 0.5;
+      const y = Math.floor(random(state) * grid.height) + 0.5;
+      const d = rt.field.distanceAt(x, y);
+      if (d < near || d > far) continue;
+      if (sided && (x - origin.x) * origin.dx + (y - origin.y) * origin.dy < 6) continue;
+      if (lineOfSight(grid, state.player.x, state.player.y, x, y)) continue;
+      let placed = 0;
+      const total = count + (tank ? 1 : 0);
+      for (let k = 0; k < total * 6 && placed < total; k++) {
+        const zx = x + randomRange(state, -3, 3);
+        const zy = y + randomRange(state, -3, 3);
+        if (isSolid(grid, Math.floor(zx), Math.floor(zy)) || rt.field.distanceAt(zx, zy) < 0) continue;
+        const kind = tank && placed === 0 ? 'tank' : waveKind(state, wave);
+        const z = createZombie(state, zx, zy, kind);
+        const fixed = moveCircle(grid, zx, zy, z.radius, 0, 0);
+        z.x = z.prevX = z.homeX = fixed.x;
+        z.y = z.prevY = z.homeY = fixed.y;
+        z.mode = 'chase';
+        z.lastSeenAt = state.time;
+        z.huntUntil = state.time + WAVE_HUNT;
+        z.hordeUntil = state.time + WAVE_HUNT;
+        z.wave = true;
+        state.zombies.push(z);
+        placed++;
+      }
+      return placed;
+    }
+  }
+  return 0;
+}
+
+/** Cuánto tiempo te cazan los de una oleada (de sobra: la defensa dura menos). */
+const WAVE_HUNT = 240;
+/** Hasta dónde se oye un ruido durante la defensa final. */
+const DEFENSE_HEARING = 10;
+
+/** Qué sale en la oleada número `wave`: al principio caminantes; después corredores y especiales. */
+function waveKind(state: GameState, wave: number): ZombieKind {
+  const r = random(state);
+  const runners = Math.min(0.32, 0.08 + 0.03 * wave);
+  if (r < runners) return 'runner';
+  if (wave >= 2 && r < runners + 0.05) return 'bloater';
+  if (wave >= 3 && r < runners + 0.1) return 'spitter';
+  return 'walker';
 }

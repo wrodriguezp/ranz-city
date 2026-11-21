@@ -7,7 +7,7 @@
 import type { City } from '../world/city';
 import { dangerAt } from '../world/zones';
 import { unstuck } from './collision';
-import { createEscape, updateEscape } from './escape';
+import { createEscape, radioExitAt, updateEscape } from './escape';
 import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { updateExplosives } from './explosives';
@@ -136,7 +136,9 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
 
   // El combate va antes que los zombies: lo que muere en este paso ya no ataca.
   updateCombat(state, rt, intent, dt);
-  updateLoot(state, rt, intent.search, dt);
+  // En la zona de una salida, E es la radio (no revisar la caja de al lado).
+  const atRadio = radioExitAt(state, rt.city.evac) >= 0;
+  updateLoot(state, rt, intent.search && !atRadio, dt);
   updateExplosives(state, rt, dt);
 
   rt.field.update(state.player.x, state.player.y);
@@ -146,7 +148,7 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   updateHazards(state, rt, dt);
   updateHordes(state, rt, dt, dangerAt(rt.city.zones, state.player.x, state.player.y));
 
-  updateEscape(state, rt, rt.city.evac, dt);
+  updateEscape(state, rt, rt.city.evac, intent.search && atRadio, dt);
 
   if (state.player.hp <= 0 && state.status === 'playing') {
     state.status = 'lost';

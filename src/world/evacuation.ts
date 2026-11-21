@@ -28,9 +28,16 @@ export interface EvacPoint {
   kind: ExitKind;
   x: number;
   y: number;
-  /** Radio de la zona de evacuación (tiles) y segundos que hay que aguantar adentro. */
+  /** Radio de la zona de evacuación (tiles) y segundos que hay que estar adentro para subir. */
   radius: number;
   hold: number;
+  /**
+   * Segundos de la defensa final: desde que pides la evacuación por radio hasta que el vehículo
+   * está listo. Mientras, llegan oleadas por el embudo (ver game/escape.ts).
+   */
+  defense: number;
+  /** Por dónde llegan las oleadas (vector unitario hacia afuera de la salida). */
+  funnel: { dx: number; dy: number };
   /** Segundos de partida (reales) en que se va, o null si espera siempre. */
   deadline: number | null;
   /** Largo de la ruta corta, en tramos. */
@@ -38,6 +45,9 @@ export interface EvacPoint {
 }
 
 const PLAYER_SPEED = 5.5;
+/** El helicóptero tarda más en llegar: es la gran pelea (y la plaza tiene el mejor arsenal). */
+const HELI_DEFENSE = 150;
+const TRUCK_DEFENSE = 90;
 const TRAVEL_FACTOR = 5;
 const BASE_MARGIN = 180;
 const MIN_GAP = 100;
@@ -54,7 +64,9 @@ export function planEvacuation(layout: CityLayout): EvacPoint[] {
       x: pos.x,
       y: pos.y,
       radius: exit.kind === 'helicopter' ? 3.5 : 2.5,
-      hold: exit.kind === 'helicopter' ? 8 : 5,
+      hold: exit.kind === 'helicopter' ? 4 : 3,
+      defense: exit.kind === 'helicopter' ? HELI_DEFENSE : TRUCK_DEFENSE,
+      funnel: exit.funnel,
       deadline: null,
       edges,
     };

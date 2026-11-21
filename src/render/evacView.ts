@@ -6,6 +6,10 @@ import * as THREE from 'three';
 import type { GameState } from '../game/state';
 import type { EvacPoint } from '../world/evacuation';
 
+/** Altura a la que espera el helicóptero y segundos que tarda en bajar. */
+const HELI_HOVER = 26;
+const HELI_DESCENT = 10;
+
 interface Vehicle {
   point: EvacPoint;
   group: THREE.Group;
@@ -76,14 +80,27 @@ export class EvacView {
       const gone = escape.departed[i] || escape.escapedVia === i;
       if (gone && v.leaving < 0) v.leaving = 0;
 
-      if (v.rotor) v.rotor.rotation.y += dt * (v.leaving >= 0 || escape.progress[i] > 0 ? 28 : 9);
+      const defense = escape.defense?.exit === i ? escape.defense : null;
+      if (v.rotor) v.rotor.rotation.y += dt * (v.leaving >= 0 || defense ? 28 : 9);
+      // El helicóptero no está esperando: da vueltas alto sobre la ciudad hasta que lo llamas y
+      // baja en los últimos segundos de la defensa (aterriza justo cuando está listo).
+      if (v.point.kind === 'helicopter' && v.leaving < 0) {
+        const descent = defense ? (defense.ready ? 0 : Math.min(1, defense.timer / HELI_DESCENT)) : 1;
+        const orbit = time * 0.25;
+        v.group.position.set(
+          v.point.x + Math.cos(orbit) * 14 * descent,
+          HELI_HOVER * descent,
+          v.point.y + Math.sin(orbit) * 14 * descent,
+        );
+      }
 
       if (v.leaving >= 0) {
         v.leaving += dt;
         const t = v.leaving;
         if (v.point.kind === 'helicopter') {
-          v.group.position.y = Math.min(60, t * t * 3);
-          v.group.position.x = v.point.x + t * t * 1.5;
+          // Se va desde donde esté (aterrizado si escapaste; volando si se fue sin ti).
+          v.group.position.y = Math.min(60, v.group.position.y + dt * (2 + t * 6));
+          v.group.position.x += dt * (1 + t * 3);
         } else {
           v.group.position.x = v.point.x + v.outX * (1.2 + t * t * 4);
           v.group.position.z = v.point.y + v.outY * (1.2 + t * t * 4);

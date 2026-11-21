@@ -123,10 +123,13 @@ export function buildBlocksView(city: City): BlocksView {
           continue;
         }
         // Reja: un panel delgado orientado según el lado del recinto (las esquinas llevan dos).
-        const lx = block ? x - block.x - SIDEWALK_WIDTH : 1;
-        const ly = block ? y - block.y - SIDEWALK_WIDTH : 1;
-        const edge = BLOCK_SIZE - SIDEWALK_WIDTH * 2 - 1;
-        const color = block?.kind === 'hospital' ? 0xb0b6bc : 0x7c838b;
+        // (La valla militar de la plaza va por el borde de la manzana, no del recinto: finale.ts.)
+        const plaza = block?.isPlaza === true;
+        const inset = plaza ? 0 : SIDEWALK_WIDTH;
+        const lx = block ? x - block.x - inset : 1;
+        const ly = block ? y - block.y - inset : 1;
+        const edge = BLOCK_SIZE - inset * 2 - 1;
+        const color = plaza ? 0x5d6644 : block?.kind === 'hospital' ? 0xb0b6bc : 0x7c838b;
         if (ly === 0 || ly === edge) pieces.add(cx, 0, cz, 1, 1.3, 0.08, 0, color);
         if (lx === 0 || lx === edge) pieces.add(cx, 0, cz, 0.08, 1.3, 1, 0, color);
         pieces.add(x, 0, cz, 0.1, 1.45, 0.1, 0, 0x50555c); // poste

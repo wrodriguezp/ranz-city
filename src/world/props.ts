@@ -57,6 +57,11 @@ export interface Container {
   alarm: boolean;
   /** Índice de color, solo para dibujar (autos: CAR_AMBULANCE y CAR_MILITARY son especiales). */
   variant: number;
+  /**
+   * Caja de munición de una salida (ver finale.ts): no se vacía, se RELLENA. Se puede volver a
+   * usar cada tantos segundos; es lo que permite pelear la defensa final a puro plomo.
+   */
+  refill?: boolean;
 }
 
 /** Variantes especiales de auto (fuera de la paleta común). */
@@ -153,10 +158,11 @@ export function placeProps(
       ];
       // Depósito militar: el subfusil y granadas. Llegar a la plaza tiene premio.
       const guaranteed: LootItem[][] = [
-        [{ type: 'smg', amount: 1 }, { type: 'ammo', amount: 40 }],
-        [{ type: 'medkit', amount: 2 }, { type: 'grenade', amount: 2 }, { type: 'molotov', amount: 1 }],
+        // (La cuarta esquina es la caja de munición que se rellena: ver finale.ts.)
+        [{ type: 'smg', amount: 1 }, { type: 'ammo', amount: 60 }, { type: 'minigun', amount: 1 }],
+        [{ type: 'medkit', amount: 2 }, { type: 'grenade', amount: 3 }, { type: 'molotov', amount: 2 }],
         // Y una bengala: desde la plaza se puede pedir un suministro aéreo.
-        [{ type: 'shells', amount: 8 }, { type: 'battery', amount: 1 }, { type: 'flare', amount: 1 }],
+        [{ type: 'shotgun', amount: 1 }, { type: 'shells', amount: 16 }, { type: 'battery', amount: 1 }, { type: 'flare', amount: 1 }],
       ];
       corners.forEach(([ox, oy], i) => {
         const x = block.x + ox;

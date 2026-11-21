@@ -18,6 +18,11 @@ export interface LootState {
   progress: number;
   /** Suministro aéreo que se está abriendo (índice en state.drops, -1 = ninguno). */
   dropTarget: number;
+  /**
+   * Cajas de munición de las salidas (Container.refill) que se están rellenando: id y cuándo
+   * vuelven a estar listas. Mientras, cuentan como revisadas.
+   */
+  refilling: { id: number; readyAt: number }[];
 }
 
 export const SEARCH_RANGE = 1.5;
@@ -25,7 +30,7 @@ const SEARCH_TIME: Record<Container['kind'], number> = { car: 1.6, crate: 1.0, b
 const DROP_TIME = 1.5;
 
 export function createLoot(count: number): LootState {
-  return { searched: new Array(count).fill(false), target: -1, progress: 0, dropTarget: -1 };
+  return { searched: new Array(count).fill(false), target: -1, progress: 0, dropTarget: -1, refilling: [] };
 }
 
 /**
@@ -101,8 +106,18 @@ export function searchableNear(state: GameState, containers: readonly Container[
   return best;
 }
 
+/** Lo que da la caja de munición de una salida cada vez, y cada cuánto se rellena. */
+const REFILL_LIGHT = 90;
+const REFILL_SHELLS = 12;
+export const REFILL_SECONDS = 15;
+
 export function updateLoot(state: GameState, rt: ZombieRuntime, holding: boolean, dt: number): void {
   const loot = state.loot;
+  // Las cajas de munición que ya se rellenaron vuelven a estar disponibles.
+  if (loot.refilling.length > 0 && loot.refilling[0].readyAt <= state.time) {
+    loot.searched[loot.refilling[0].id] = false;
+    loot.refilling.shift();
+  }
   // El suministro tiene prioridad: si estás al lado de uno, E abre ese.
   if (updateDrop(state, holding, dt)) return;
   const containers = rt.city.props;
@@ -120,6 +135,19 @@ export function updateLoot(state: GameState, rt: ZombieRuntime, holding: boolean
   loot.searched[near] = true;
   loot.target = -1;
   loot.progress = 0;
+  if (container.refill) {
+    // La caja de munición no se vacía: da balas y cartuchos y se rellena en unos segundos.
+    state.weapon.ammo.light += REFILL_LIGHT;
+    state.weapon.ammo.shells += REFILL_SHELLS;
+    loot.refilling.push({ id: near, readyAt: state.time + REFILL_SECONDS });
+    state.events.push({ type: 'sfx', name: 'reload', x: state.player.x, y: state.player.y });
+    state.events.push({
+      type: 'message',
+      text: `Munición: +${REFILL_LIGHT} balas, +${REFILL_SHELLS} cartuchos (se rellena en ${REFILL_SECONDS} s)`,
+      tone: 'good',
+    });
+    return;
+  }
   const found = container.loot.map((item) => give(state, item));
   if (found.length) state.events.push({ type: 'sfx', name: 'pickup', x: state.player.x, y: state.player.y });
   const what = container.kind === 'car' ? 'el auto' : container.kind === 'crate' ? 'la caja' : 'el cuerpo';
@@ -204,7 +232,18 @@ export function searchPrompt(state: GameState, containers: readonly Container[])
     return { text: '<span class="key">E</span> Abrir el suministro <span class="dim">(mantener)</span>' };
   }
   const target = state.loot.target >= 0 ? state.loot.target : searchableNear(state, containers);
-  if (target < 0) return { text: '' };
+  if (target < 0) {
+    // ¿Al lado de una caja de munición que se está rellenando? Avisamos cuánto falta.
+    const wait = state.loot.refilling.find((r) => {
+      const c = containers[r.id];
+      return Math.hypot(c.x + 0.5 - state.player.x, c.y + 0.5 - state.player.y) < SEARCH_RANGE + 0.7;
+    });
+    return { text: wait ? `<span class="dim">Caja de munición: se rellena en ${Math.ceil(wait.readyAt - state.time)} s</span>` : '' };
+  }
+  if (containers[target].refill) {
+    if (state.loot.target === target) return { text: 'Cargando munición…', progress: state.loot.progress };
+    return { text: '<span class="key">E</span> Cargar munición <span class="dim">(se rellena)</span>' };
+  }
   const kind = containers[target].kind;
   const name = kind === 'car' ? 'el auto' : kind === 'crate' ? 'la caja' : 'el cuerpo';
   if (state.loot.target === target) return { text: `Registrando ${name}…`, progress: state.loot.progress };

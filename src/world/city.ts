@@ -12,6 +12,7 @@ import { planEvacuation, type EvacPoint } from './evacuation';
 import { placeBarrels, placeProps, type Barrel, type Container } from './props';
 import { placeStreetLights, type LightMap } from './streetLights';
 import { placeDecor, type Decor } from './decor';
+import { placeFinales } from './finale';
 import { rollWeather, type Weather } from './weather';
 import { computeZones, dangerAt, type ZoneMap } from './zones';
 
@@ -69,6 +70,8 @@ export function generateCity(seedText: string): City {
   // aparece adentro de un auto.
   const props = placeProps(grid, layout, zones, spawn, rng.fork('props'));
   const barrels = placeBarrels(grid, zones, spawn, rng.fork('barrels'));
+  // La valla de la plaza y el arsenal de cada salida (para la defensa final), antes que los zombies.
+  placeFinales(grid, layout, props, barrels);
   const encounters = planEncounters(grid, layout, zones, spawn, rng.fork('encounters'));
 
   const evac = planEvacuation(layout);
