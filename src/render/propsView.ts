@@ -1,21 +1,29 @@
 // Dibuja autos, cajas y cuerpos, más un pequeño destello sobre lo que todavía no revisaste.
 //
-// Son estáticos (salen de la seed), así que las matrices se calculan una sola vez. Lo único
-// que cambia es el destello: se apaga al revisar y solo se ve de cerca, para que en la
-// oscuridad haya que acercarse y arriesgarse para encontrar loot.
+// Son estáticos (salen de la seed), así que las matrices se calculan una sola vez. Lo que cambia:
+//  - el destello: se apaga al revisar y solo se ve a media distancia, para que en la oscuridad
+//    haya que acercarse y arriesgarse para encontrar loot;
+//  - un anillo en el suelo alrededor del contenedor más cercano: "con esto puedes interactuar";
+//  - un arco que se va llenando mientras lo registras (además de la barra del HUD).
 
 import * as THREE from 'three';
+import { SEARCH_RANGE, searchableNear } from '../game/loot';
 import type { GameState } from '../game/state';
 import type { Container } from '../world/props';
 
 const CAR_COLORS = [0x7a2e2e, 0x2e4a7a, 0x8a8a8a, 0x2f2f33, 0x6b6b3a, 0xcfcfcf];
 const BODY_COLORS = [0x4f5d6e, 0x6e5a4a, 0x4a6e52, 0x705070];
-const GLINT_DISTANCE = 11;
+const GLINT_DISTANCE = 16;
+/** Desde esta distancia aparece el anillo (tenue); al alcance de E, brillante. */
+const HIGHLIGHT_DISTANCE = 4;
 
 export class PropsView {
   readonly root = new THREE.Group();
   private readonly glints: THREE.InstancedMesh;
   private readonly glintOwners: number[] = [];
+  private readonly highlight: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  private readonly progressArc: THREE.Mesh<THREE.RingGeometry, THREE.MeshBasicMaterial>;
+  private arcStep = -1;
   private readonly matrix = new THREE.Matrix4();
   private readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
   private readonly geometries: THREE.BufferGeometry[] = [];
@@ -61,7 +69,7 @@ export class PropsView {
     });
 
     // Destellos: un rombito amarillo que flota. MeshBasic (no le afecta la luz): se ve en la oscuridad.
-    const glintGeometry = new THREE.OctahedronGeometry(0.16);
+    const glintGeometry = new THREE.OctahedronGeometry(0.22);
     this.geometries.push(glintGeometry);
     this.glints = this.instanced(
       glintGeometry,
@@ -70,6 +78,19 @@ export class PropsView {
     );
     this.glints.castShadow = false;
     for (const c of containers) this.glintOwners.push(c.id);
+
+    // Anillo de "puedes interactuar" y arco de progreso: acostados en el suelo.
+    const flat = { transparent: true, depthWrite: false, side: THREE.DoubleSide } as const;
+    this.highlight = new THREE.Mesh(new THREE.RingGeometry(0.92, 1, 40), new THREE.MeshBasicMaterial({ color: 0xffd25a, ...flat }));
+    this.progressArc = new THREE.Mesh(new THREE.RingGeometry(0.75, 0.9, 40, 1, 0, 0.01), new THREE.MeshBasicMaterial({ color: 0x8fff8f, ...flat }));
+    for (const mesh of [this.highlight, this.progressArc]) {
+      mesh.rotation.x = -Math.PI / 2;
+      mesh.visible = false;
+      mesh.renderOrder = 4;
+      this.root.add(mesh);
+      this.geometries.push(mesh.geometry);
+      this.materials.push(mesh.material);
+    }
   }
 
   update(state: GameState, time: number): void {
@@ -90,6 +111,40 @@ export class PropsView {
       this.glints.setMatrixAt(i, this.matrix);
     }
     this.glints.instanceMatrix.needsUpdate = true;
+    this.updateHighlight(state, time);
+  }
+
+  private updateHighlight(state: GameState, time: number): void {
+    const searching = state.loot.target;
+    const target = searching >= 0 ? searching : searchableNear(state, this.containers, HIGHLIGHT_DISTANCE);
+    this.highlight.visible = target >= 0;
+    this.progressArc.visible = searching >= 0;
+    if (target < 0) return;
+    const c = this.containers[target];
+    const cx = c.x + c.w / 2;
+    const cy = c.y + c.h / 2;
+    // El anillo rodea al contenedor: un auto (3 × 2) necesita uno más grande que una caja.
+    const radius = Math.max(c.w, c.h) * 0.6 + 0.4;
+    const inRange = searching >= 0 || searchableNear(state, this.containers, SEARCH_RANGE) === target;
+    this.highlight.position.set(cx, 0.05, cy);
+    this.highlight.scale.setScalar(radius * (inRange ? 1 + Math.sin(time * 6) * 0.04 : 1));
+    this.highlight.material.opacity = inRange ? 0.85 : 0.3;
+
+    if (searching >= 0) {
+      // Rehacer la geometría del arco solo cuando avanza un "paso" (de 48): es barato y suficiente.
+      const step = Math.round(state.loot.progress * 48);
+      if (step !== this.arcStep) {
+        this.arcStep = step;
+        this.progressArc.geometry.dispose();
+        this.progressArc.geometry = new THREE.RingGeometry(0.75, 0.92, 40, 1, Math.PI / 2, -Math.max(0.01, (step / 48) * Math.PI * 2));
+        this.geometries.push(this.progressArc.geometry);
+      }
+      this.progressArc.position.set(cx, 0.06, cy);
+      this.progressArc.scale.setScalar(radius);
+      this.progressArc.material.opacity = 0.95;
+    } else {
+      this.arcStep = -1;
+    }
   }
 
   dispose(): void {

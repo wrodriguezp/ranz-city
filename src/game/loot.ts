@@ -15,7 +15,7 @@ export interface LootState {
   progress: number;
 }
 
-const SEARCH_RANGE = 1.2;
+export const SEARCH_RANGE = 1.5;
 const SEARCH_TIME: Record<Container['kind'], number> = { car: 1.6, crate: 1.0, body: 1.2 };
 const ALARM_NOISE = 34;
 
@@ -30,11 +30,11 @@ function distanceTo(c: Container, x: number, y: number): number {
   return Math.hypot(dx, dy);
 }
 
-/** El contenedor sin revisar más cercano al alcance del jugador, o -1. */
-export function searchableNear(state: GameState, containers: readonly Container[]): number {
+/** El contenedor sin revisar más cercano al alcance del jugador (o a `range` tiles), o -1. */
+export function searchableNear(state: GameState, containers: readonly Container[], range = SEARCH_RANGE): number {
   const { x, y } = state.player;
   let best = -1;
-  let bestDist = SEARCH_RANGE;
+  let bestDist = range;
   for (const c of containers) {
     if (state.loot.searched[c.id]) continue;
     if (Math.abs(c.x - x) > 4 || Math.abs(c.y - y) > 4) continue;
@@ -73,7 +73,7 @@ export function updateLoot(state: GameState, rt: ZombieRuntime, holding: boolean
     tone: found.length ? 'good' : 'info',
   });
   if (container.alarm) {
-    makeNoise(state, container.x + container.w / 2, container.y + container.h / 2, ALARM_NOISE);
+    makeNoise(state, container.x + container.w / 2, container.y + container.h / 2, ALARM_NOISE, rt);
     state.noiseHeat += 8;
     state.events.push({ type: 'alarm', x: container.x + container.w / 2, y: container.y + container.h / 2 });
     state.events.push({ type: 'message', text: '¡Saltó la alarma del auto!', tone: 'danger' });
@@ -87,10 +87,10 @@ function give(state: GameState, item: LootItem): string {
       return `${item.amount} balas`;
     case 'medkit':
       state.inventory.medkits += item.amount;
-      return 'un botiquín';
+      return item.amount > 1 ? `${item.amount} botiquines` : 'un botiquín';
     case 'battery':
       state.inventory.batteries += item.amount;
-      return 'una batería';
+      return item.amount > 1 ? `${item.amount} baterías` : 'una batería';
   }
 }
 
@@ -104,6 +104,6 @@ export function searchPrompt(state: GameState, containers: readonly Container[])
   if (target < 0) return { text: '' };
   const kind = containers[target].kind;
   const name = kind === 'car' ? 'el auto' : kind === 'crate' ? 'la caja' : 'el cuerpo';
-  if (state.loot.target === target) return { text: `Revisando ${name}…`, progress: state.loot.progress };
-  return { text: `Mantén <b>E</b> para revisar ${name}` };
+  if (state.loot.target === target) return { text: `Registrando ${name}…`, progress: state.loot.progress };
+  return { text: `<span class="key">E</span> Revisar ${name} <span class="dim">(mantener)</span>` };
 }

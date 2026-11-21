@@ -8,9 +8,15 @@
 // Cómo encuentran al jugador:
 //  - VISTA: rayo sobre la grilla (lineOfSight). Alcance corto en la oscuridad y largo si llevas
 //    la linterna encendida: la luz te deja ver, pero también te delata.
-//  - OÍDO: los ruidos (disparos, golpes) atraen a todos los zombies en un radio (makeNoise).
+//  - OÍDO: los ruidos (disparos, golpes, pisadas) atraen a los zombies en un radio (makeNoise).
+//    Ojo: van al LUGAR del ruido, no a ti. Si disparas y te mueves, llegan a donde estabas.
+//    Mientras más lejos lo oyeron, más impreciso es el punto al que van.
 //  - HORDAS: cada cierto tiempo (o si haces mucho ruido) aparece un grupo fuera de tu vista que
-//    ya sabe dónde estás y te persigue usando el campo de flujo (flowField.ts).
+//    va al último ruido fuerte y peina la zona. Solo te persigue de verdad si te VE.
+//
+// Para llegar a un punto rodeando edificios se usa un campo de flujo (flowField.ts). Hay dos:
+// uno hacia el jugador y otro hacia el último ruido fuerte. Un zombie que investiga usa el
+// que corresponda a su objetivo; así un ruido lejano (una granada, una alarma) los aleja de ti.
 
 import type { City } from '../world/city';
 import { isSolid, moveCircle } from './collision';
@@ -26,8 +32,15 @@ import { angleBetween, lineOfSight } from './visibility';
 export interface ZombieRuntime {
   city: City;
   field: FlowField;
+  /** Campo de flujo hacia el último ruido fuerte (ver makeNoise). */
+  noiseField: FlowField;
   hash: SpatialHash;
 }
+
+/** Desde este radio un ruido cuenta como "fuerte": mueve el campo de flujo de ruido y atrae hordas. */
+const LOUD_NOISE = 15;
+/** Si el objetivo está a menos de esto del origen de un campo de flujo, se usa ese campo. */
+const FIELD_SNAP = 10;
 
 const STATS: Record<
   ZombieKind,
@@ -99,25 +112,27 @@ export function initialHordeTimer(): number {
 }
 
 /**
- * Un ruido en (x, y) que se oye hasta `radius` tiles. Los zombies cercanos van a investigar;
- * los muy cercanos ya saben dónde estás y persiguen directamente.
+ * Un ruido en (x, y) que se oye hasta `radius` tiles. Los zombies que lo oyen van a INVESTIGAR
+ * ese punto (no al jugador): si después te mueves en silencio, llegan a un lugar vacío.
  */
-export function makeNoise(state: GameState, x: number, y: number, radius: number): void {
+export function makeNoise(state: GameState, x: number, y: number, radius: number, rt?: ZombieRuntime): void {
+  if (radius >= LOUD_NOISE) {
+    state.lastNoise = { x, y, time: state.time };
+    rt?.noiseField.update(x, y);
+  }
   for (const z of state.zombies) {
     // El tanque está "de guardia": oye menos.
     const r = z.kind === 'tank' ? radius * 0.6 : radius;
     const d = Math.hypot(z.x - x, z.y - y);
-    if (d > r || z.mode === 'chase' || z.mode === 'charge' || z.mode === 'stunned') continue;
-    if (d < r * 0.4) {
-      z.mode = 'chase';
-      z.lastSeenAt = state.time;
-    } else {
-      z.mode = 'investigate';
-      z.timer = 9;
-    }
-    // Apuntan al ruido con algo de error: no todos llegan exactamente al mismo punto.
-    z.targetX = x + randomRange(state, -2, 2);
-    z.targetY = y + randomRange(state, -2, 2);
+    if (d > r || z.mode === 'charge' || z.mode === 'stunned') continue;
+    // El que te está viendo no se distrae con un ruido.
+    if (z.mode === 'chase' && z.seesPlayer) continue;
+    z.mode = 'investigate';
+    z.timer = 9;
+    // Apuntan al ruido con un error que crece con la distancia: de lejos solo saben "por ahí".
+    const error = 1 + d * 0.12;
+    z.targetX = x + randomRange(state, -error, error);
+    z.targetY = y + randomRange(state, -error, error);
   }
 }
 
@@ -129,6 +144,7 @@ export function damageZombie(
   knockX: number,
   knockY: number,
   stagger: number,
+  options: { crit?: boolean; gib?: boolean } = {},
 ): boolean {
   if (z.hp <= 0) return false;
   // Un tanque aturdido recibe el doble: es la ventana para pelearlo.
@@ -140,10 +156,34 @@ export function damageZombie(
   z.knockY += knockY * heavy;
   z.stagger = Math.max(z.stagger, stagger * heavy);
   state.events.push({ type: 'blood', x: z.x, y: z.y });
-  // Golpearlo lo despierta aunque no te haya visto.
+  const knock = Math.hypot(knockX, knockY) || 1;
+  const killed = z.hp <= 0;
+  state.events.push({
+    type: 'hit',
+    x: z.x,
+    y: z.y,
+    dirX: knockX / knock,
+    dirY: knockY / knock,
+    damage: Math.round(amount),
+    killed,
+    // Revienta si lo dice el arma, o si el golpe fue mucho más de lo que le quedaba.
+    gib: killed && (options.gib === true || -z.hp > z.maxHp * 0.6),
+    crit: options.crit === true,
+    kind: z.kind,
+  });
+  // Golpearlo lo despierta aunque no te haya visto. De cerca sabe de dónde vino; de lejos
+  // (una bala desde la oscuridad) solo sabe la dirección aproximada: va a investigar.
   if (z.mode !== 'charge' && z.mode !== 'stunned') {
-    z.mode = 'chase';
-    z.lastSeenAt = state.time;
+    const d = Math.hypot(state.player.x - z.x, state.player.y - z.y);
+    if (d < 12 || z.seesPlayer) {
+      z.mode = 'chase';
+      z.lastSeenAt = state.time;
+    } else {
+      z.mode = 'investigate';
+      z.timer = 9;
+      z.targetX = state.player.x + randomRange(state, -3, 3);
+      z.targetY = state.player.y + randomRange(state, -3, 3);
+    }
   }
   if (z.hp <= 0) {
     state.stats.kills++;
@@ -206,9 +246,11 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
           const ty = z.targetY - z.y;
           const td = Math.hypot(tx, ty);
           if (td > 1.5) {
-            // Hacia el ruido: en línea recta si se ve, o por el campo de flujo si hay edificios entre medio.
-            const speed = z.speed * 0.75;
-            if (lineOfSightCached(rt, z, z.targetX, z.targetY, state.tick) || !rt.field.direction(z.x, z.y, flow)) {
+            // Hacia el ruido: en línea recta si se ve, o por el campo de flujo que lleve a ese
+            // punto si hay edificios entre medio. Las hordas caminan más decididas.
+            const speed = z.speed * (state.time < z.hordeUntil ? 0.9 : 0.75);
+            const field = fieldFor(rt, state, z.targetX, z.targetY);
+            if (lineOfSightCached(rt, z, z.targetX, z.targetY, state.tick) || !field || !field.direction(z.x, z.y, flow)) {
               vx = (tx / td) * speed;
               vy = (ty / td) * speed;
             } else {
@@ -383,8 +425,8 @@ function think(
 
   switch (z.mode) {
     case 'chase': {
-      const horde = state.time < z.hordeUntil;
-      if (!z.seesPlayer && !horde && state.time - z.lastSeenAt > LOSE_INTEREST) {
+      // Si te perdió de vista, va a la última posición donde te vio y busca por ahí.
+      if (!z.seesPlayer && state.time - z.lastSeenAt > LOSE_INTEREST) {
         z.mode = 'investigate';
         z.timer = 6;
       }
@@ -402,13 +444,26 @@ function think(
       }
       break;
     }
-    case 'investigate':
+    case 'investigate': {
+      const horde = state.time < z.hordeUntil;
+      const arrived = Math.hypot(z.targetX - z.x, z.targetY - z.y) < 2;
+      if (horde && arrived) {
+        // La horda llegó y no hay nadie: peina la zona. Si hubo un ruido fuerte reciente, va
+        // hacia él; si no, deambula por el barrio donde se te oyó por última vez.
+        const recent = state.time - state.lastNoise.time < 10;
+        const spread = recent ? 3 : 9;
+        z.targetX = state.lastNoise.x + randomRange(state, -spread, spread);
+        z.targetY = state.lastNoise.y + randomRange(state, -spread, spread);
+        z.timer = 9;
+        break;
+      }
       z.timer -= thinkDt;
-      if (z.timer <= 0) {
+      if (z.timer <= 0 && !horde) {
         z.mode = z.kind === 'tank' ? 'return' : 'wander';
         z.timer = randomRange(state, 2, 6);
       }
       break;
+    }
     case 'idle':
     case 'wander':
       if (z.kind === 'tank') break;
@@ -420,6 +475,15 @@ function think(
       }
       break;
   }
+}
+
+/** ¿Qué campo de flujo lleva al punto (x, y)? El del jugador o el del último ruido, si alguno queda cerca. */
+function fieldFor(rt: ZombieRuntime, state: GameState, x: number, y: number): FlowField | undefined {
+  const toPlayer = Math.hypot(x - state.player.x, y - state.player.y);
+  const toNoise = Math.hypot(x - state.lastNoise.x, y - state.lastNoise.y);
+  if (toNoise < FIELD_SNAP && toNoise <= toPlayer) return rt.noiseField;
+  if (toPlayer < FIELD_SNAP) return rt.field;
+  return undefined;
 }
 
 /** Caché simple: la línea de visión al objetivo de investigación solo se recalcula al pensar. */
@@ -476,11 +540,21 @@ export function updateHordes(state: GameState, rt: ZombieRuntime, dt: number, da
   }
 }
 
-/** Crea una horda fuera de la vista del jugador, a una distancia (caminando) de 26 a 44 tiles. */
+/**
+ * Crea una horda fuera de la vista del jugador, a una distancia (caminando) de 26 a 44 tiles.
+ * La horda va hacia el último ruido fuerte; si hace rato que no haces ruido, hacia la zona donde
+ * estás pero con mucho error: "algo los atrajo a este barrio", no "saben en qué esquina estás".
+ */
 export function spawnHorde(state: GameState, rt: ZombieRuntime, size: number): boolean {
   const { grid } = rt.city;
   const count = Math.min(size, MAX_ZOMBIES - state.zombies.length);
   if (count <= 0) return false;
+  if (state.time - state.lastNoise.time > 20) {
+    const x = state.player.x + randomRange(state, -10, 10);
+    const y = state.player.y + randomRange(state, -10, 10);
+    state.lastNoise = { x, y, time: state.time - 10 };
+    rt.noiseField.update(x, y);
+  }
 
   for (let attempt = 0; attempt < 400; attempt++) {
     const x = Math.floor(random(state) * grid.width) + 0.5;
@@ -499,8 +573,10 @@ export function spawnHorde(state: GameState, rt: ZombieRuntime, size: number): b
       const fixed = moveCircle(grid, zx, zy, z.radius, 0, 0);
       z.x = z.prevX = fixed.x;
       z.y = z.prevY = fixed.y;
-      z.mode = 'chase';
-      z.lastSeenAt = state.time;
+      z.mode = 'investigate';
+      z.timer = 9;
+      z.targetX = state.lastNoise.x + randomRange(state, -3, 3);
+      z.targetY = state.lastNoise.y + randomRange(state, -3, 3);
       z.hordeUntil = state.time + HORDE_CHASE_TIME;
       state.zombies.push(z);
       placed++;

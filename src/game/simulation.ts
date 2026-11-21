@@ -46,6 +46,7 @@ export function createRuntime(city: City): Runtime {
   return {
     city,
     field: new FlowField(city.grid),
+    noiseField: new FlowField(city.grid),
     hash: new SpatialHash(city.grid.width, city.grid.height, 2),
   };
 }
@@ -68,6 +69,7 @@ export function createGameState(city: City): GameState {
     corpses: [],
     hordeTimer: initialHordeTimer(),
     noiseHeat: 0,
+    lastNoise: { x: city.spawn.x, y: city.spawn.y, time: -999 },
     stats: { kills: 0, shots: 0, hordes: 0 },
     events: [],
   };

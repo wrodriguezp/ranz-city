@@ -89,7 +89,8 @@ export class Hud {
       ? `${text}${progress !== undefined ? `<div class="bar"><div class="fill" style="width:${Math.round(progress * 100)}%"></div></div>` : ''}`
       : '';
     this.set(this.prompt, html);
-    this.prompt.style.display = text ? '' : 'none';
+    // El CSS lo oculta por defecto: hay que mostrarlo explícitamente ('' volvería a ocultarlo).
+    this.prompt.style.display = text ? 'block' : 'none';
   }
 
   /** Reloj y salidas (panel bajo el minimapa). */
@@ -128,10 +129,17 @@ export class Hud {
 
     // Sigilo: ¿cuántos te están persiguiendo? Si ninguno, estás oculto.
     let hunting = 0;
-    for (const z of state.zombies) if (z.hp > 0 && (z.mode === 'chase' || z.mode === 'charge')) hunting++;
+    let searching = 0;
+    for (const z of state.zombies) {
+      if (z.hp <= 0) continue;
+      if (z.mode === 'chase' || z.mode === 'charge') hunting++;
+      else if (z.mode === 'investigate' && state.time < z.hordeUntil) searching++;
+    }
     const stealthHtml = hunting
       ? `<span class="seen">TE VIERON · ${hunting}</span>`
-      : p.sneaking
+      : searching
+        ? `<span class="searching">UNA HORDA TE BUSCA · ${searching}</span>`
+        : p.sneaking
         ? `<span class="hidden">SIGILO · oculto</span>`
         : `<span class="dim">oculto</span>`;
     this.set(this.stealth, stealthHtml);

@@ -148,14 +148,28 @@ export function placeProps(
  * el loot bueno está donde está el riesgo.
  */
 function rollLoot(kind: ContainerKind, danger: number, rng: Rng): LootItem[] {
-  const rolls = kind === 'car' ? 2 : 1;
+  // Varias "tiradas" por contenedor; la primera nunca sale vacía: revisar casi siempre paga.
+  // (Un juego de supervivencia vive de la escasez, pero si 10 cajas seguidas salen vacías el
+  // jugador deja de revisar, y entonces el loot deja de ser una decisión.)
+  const rolls = kind === 'car' ? 3 : 2;
   const items: LootItem[] = [];
   for (let i = 0; i < rolls; i++) {
-    if (rng.chance(0.4 - 0.25 * danger)) continue; // vacío
+    if (i > 0 && rng.chance(0.45 - 0.2 * danger)) continue; // vacío
     const r = rng.float();
-    if (r < 0.5) items.push({ type: 'ammo', amount: rng.int(3, 6) + Math.round(danger * 6) });
-    else if (r < 0.72 + 0.08 * danger) items.push({ type: 'medkit', amount: 1 });
+    if (r < 0.6) items.push({ type: 'ammo', amount: rng.int(6, 12) + Math.round(danger * 10) });
+    else if (r < 0.8 + 0.05 * danger) items.push({ type: 'medkit', amount: 1 });
     else items.push({ type: 'battery', amount: 1 });
   }
-  return items;
+  return mergeLoot(items);
+}
+
+/** Junta lo repetido: "18 balas" en vez de "10 balas, 8 balas". */
+function mergeLoot(items: LootItem[]): LootItem[] {
+  const merged: LootItem[] = [];
+  for (const item of items) {
+    const same = merged.find((m) => m.type === item.type);
+    if (same) same.amount += item.amount;
+    else merged.push({ ...item });
+  }
+  return merged;
 }

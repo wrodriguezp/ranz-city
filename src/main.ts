@@ -9,7 +9,7 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import { flashlightPower } from './game/flashlight';
 import { Input } from './game/input';
 import { createGameState, createRuntime, stepGame, type Intent, type Runtime } from './game/simulation';
-import type { GameState } from './game/state';
+import type { GameEvent, GameState } from './game/state';
 import { buildCityView, type CityView } from './render/cityRenderer';
 import { EffectsView } from './render/effectsView';
 import { PropsView } from './render/propsView';
@@ -24,6 +24,7 @@ import { NightLighting } from './render/lighting';
 import { PlayerView } from './render/playerView';
 import { ZombieView } from './render/zombieView';
 import { Hud } from './ui/hud';
+import { DamageText } from './ui/damageText';
 import { Sfx } from './audio/sfx';
 import { generateCity, type City } from './world/city';
 
@@ -84,6 +85,12 @@ scene.add(zombieView.root);
 const effects = new EffectsView(lighting);
 scene.add(effects.root);
 const gameHud = new Hud();
+const damageText = new DamageText();
+/**
+ * Pausa de impacto ("hitstop"): al matar o dar un golpe fuerte, la simulación se congela unos
+ * pocos milisegundos. Es casi imperceptible como pausa, pero hace que el golpe se SIENTA pesado.
+ */
+let hitstop = 0;
 const sfx = new Sfx();
 let propsView: PropsView | undefined;
 let mapView: MapView | undefined;
@@ -146,6 +153,8 @@ function startGame(): void {
   aim.y = state.player.y;
   input.clearPressed();
   effects.reset();
+  damageText.clear();
+  hitstop = 0;
   gameHud.clearMessages();
   // Los vehículos de evacuación vuelven a su lugar en cada partida.
   if (evacView) {
@@ -184,6 +193,7 @@ function randomSeed(): string {
 function setMode(next: Mode): void {
   mode = next;
   gameHud.setVisible(mode === 'play');
+  damageText.setVisible(mode === 'play');
   mapView?.setVisible(mode === 'play');
   reviewControls.enabled = mode === 'review';
   lighting.setDaylight(mode === 'review');
@@ -267,7 +277,8 @@ function frame(now: number): void {
 
   if (mode === 'play') {
     // Con una pantalla abierta (inicio, pausa, fin) la simulación queda congelada.
-    accumulator = screens.current ? 0 : accumulator + frameDt;
+    hitstop = Math.max(0, hitstop - frameDt);
+    accumulator = screens.current ? 0 : hitstop > 0 ? accumulator : accumulator + frameDt;
     const t0 = performance.now();
     while (accumulator >= STEP) {
       step(STEP);
@@ -291,10 +302,13 @@ function frame(now: number): void {
     sfx.handle(state.events, listener);
     if (!screens.current) sfx.ambient(frameDt, listener, state.zombies, state.player.hp);
     effects.handle(state.events, city.seed % 1000);
+    damageText.handle(state.events, now / 1000);
+    feel(state.events);
     gameHud.handle(state.events, now / 1000);
     state.events.length = 0;
     effects.update(frameDt);
     gameHud.update(state, now / 1000);
+    damageText.update(gameCamera.camera, now / 1000);
     propsView?.update(state, now / 1000);
     const prompt = searchPrompt(state, city.props);
     gameHud.setPrompt(prompt.text, prompt.progress);
@@ -311,6 +325,30 @@ function frame(now: number): void {
   }
 
   updateHud();
+}
+
+/** Sacudida de cámara y pausa de impacto según lo que pasó en estos pasos. */
+function feel(events: readonly GameEvent[]): void {
+  for (const event of events) {
+    switch (event.type) {
+      case 'shot':
+        gameCamera.shake(0.12);
+        break;
+      case 'hit':
+        if (event.killed) {
+          gameCamera.shake(event.gib ? 0.35 : 0.2);
+          hitstop = Math.max(hitstop, event.gib ? 0.08 : 0.045);
+        } else if (event.crit) {
+          hitstop = Math.max(hitstop, 0.05);
+        }
+        break;
+      case 'hurt':
+        gameCamera.shake(Math.min(0.6, 0.15 + event.damage / 60));
+        break;
+      default:
+        break;
+    }
+  }
 }
 
 /** Interpola ángulos por el camino corto (de 350° a 10° pasa por 0°, no por 180°). */

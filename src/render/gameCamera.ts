@@ -31,6 +31,13 @@ export class GameCamera {
   private readonly hit = new THREE.Vector3();
   private viewHeight = VIEW_HEIGHT;
   private aspect = 1;
+  /**
+   * "Trauma" de la sacudida, de 0 a 1. Cada golpe o explosión suma; baja solo con el tiempo.
+   * El desplazamiento es trauma², así los golpes chicos casi no mueven la cámara y los grandes
+   * la sacuden fuerte (truco clásico de "game feel").
+   */
+  private trauma = 0;
+  private readonly jitter = new THREE.Vector2();
 
   constructor() {
     // Coordenadas esféricas: el offset apunta "hacia atrás y arriba" desde el foco.
@@ -61,6 +68,11 @@ export class GameCamera {
     this.resize(this.aspect);
   }
 
+  /** Suma una sacudida (0..1). Solo visual: no toca la simulación. */
+  shake(amount: number): void {
+    this.trauma = Math.min(1, this.trauma + amount);
+  }
+
   /** Dirección normalizada desde la escena hacia la cámara (paralela a todos los rayos de visión). */
   toCameraDirection(target = new THREE.Vector3()): THREE.Vector3 {
     return target.copy(this.offset).normalize();
@@ -82,6 +94,9 @@ export class GameCamera {
     if (lead.length() > MAX_LOOK_AHEAD) lead.setLength(MAX_LOOK_AHEAD);
     const t = 1 - Math.exp(-FOLLOW_SHARPNESS * dt);
     this.focus.lerp(new THREE.Vector2(playerX + lead.x, playerY + lead.y), t);
+    this.trauma = Math.max(0, this.trauma - 1.8 * dt);
+    const strength = this.trauma * this.trauma * 0.9;
+    this.jitter.set((Math.random() * 2 - 1) * strength, (Math.random() * 2 - 1) * strength);
     this.apply();
   }
 
@@ -114,8 +129,10 @@ export class GameCamera {
   }
 
   private apply(): void {
-    this.camera.position.set(this.focus.x + this.offset.x, this.offset.y, this.focus.y + this.offset.z);
-    this.camera.lookAt(this.focus.x, 0, this.focus.y);
+    const fx = this.focus.x + this.jitter.x;
+    const fy = this.focus.y + this.jitter.y;
+    this.camera.position.set(fx + this.offset.x, this.offset.y, fy + this.offset.z);
+    this.camera.lookAt(fx, 0, fy);
     this.camera.updateMatrixWorld();
   }
 }

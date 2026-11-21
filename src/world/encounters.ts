@@ -39,8 +39,8 @@ export interface EncounterPlan {
 /** Zona segura alrededor del inicio: nadie aparece encima del jugador. */
 export const SAFE_RADIUS = 22;
 /** Probabilidad de un zombie por tile caminable: base + extra × peligro. */
-const BASE_DENSITY = 0.006;
-const DANGER_DENSITY = 0.022;
+const BASE_DENSITY = 0.0042;
+const DANGER_DENSITY = 0.016;
 /** Los primeros tramos de la ruta nunca tienen tanque (no es justo encontrarlo de entrada). */
 const TANK_MIN_EDGE = 2;
 

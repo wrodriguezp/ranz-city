@@ -50,7 +50,9 @@ const RELOAD_TIME = 1.4;
 const MELEE_COOLDOWN = 0.5;
 const MELEE_REACH = 1.75;
 const MELEE_ARC = (120 * Math.PI) / 180;
-const MELEE_DAMAGE = 55;
+const MELEE_DAMAGE = 60;
+/** Probabilidad de golpe crítico con el bate: mata de una y revienta al zombie. */
+const MELEE_CRIT_CHANCE = 0.22;
 const MELEE_MAX_TARGETS = 3;
 const MELEE_NOISE = 6;
 /** Ejecución sigilosa: agachado y por sorpresa, el bate mata de un golpe y casi sin ruido. */
@@ -148,10 +150,11 @@ function shoot(state: GameState, rt: ZombieRuntime): void {
     }
   }
 
-  if (target >= 0) damageZombie(state, state.zombies[target], PISTOL_DAMAGE, dirX * 4, dirY * 4, 0.25);
-  state.events.push({ type: 'shot', fromX: ox, fromY: oy, toX: ox + dirX * hitDist, toY: oy + dirY * hitDist });
+  if (target >= 0) damageZombie(state, state.zombies[target], PISTOL_DAMAGE, dirX * 6, dirY * 6, 0.3);
+  const hit = target >= 0 ? 'zombie' : hitDist < PISTOL_RANGE ? 'wall' : 'none';
+  state.events.push({ type: 'shot', fromX: ox, fromY: oy, toX: ox + dirX * hitDist, toY: oy + dirY * hitDist, hit });
 
-  makeNoise(state, player.x, player.y, PISTOL_NOISE);
+  makeNoise(state, player.x, player.y, PISTOL_NOISE, rt);
   state.noiseHeat += 1;
 }
 
@@ -187,7 +190,9 @@ function swing(state: GameState, rt: ZombieRuntime): void {
       damageZombie(state, z, z.hp, nx * 2, ny * 2, 0);
       state.events.push({ type: 'sfx', name: 'takedown', x: z.x, y: z.y });
     } else {
-      damageZombie(state, z, MELEE_DAMAGE, nx * 7, ny * 7, 0.55);
+      // Crítico: el primero que recibe el golpe de lleno puede volar en pedazos.
+      const crit = z.kind !== 'tank' && random(state) < MELEE_CRIT_CHANCE;
+      damageZombie(state, z, crit ? MELEE_DAMAGE * 3 : MELEE_DAMAGE, nx * 10, ny * 10, 0.6, { crit, gib: crit });
       loud = true;
     }
   }

@@ -16,12 +16,15 @@
 import type { CityLayout } from './cityLayout';
 import type { Rng } from './rng';
 
-export const STREET_WIDTH = 6;
+export const STREET_WIDTH = 8;
 export const BLOCK_SIZE = 12;
-export const SIDEWALK_WIDTH = 1;
+export const SIDEWALK_WIDTH = 2;
 export const BARRICADE_THICKNESS = 2;
-/** Altura de un piso de edificio, en tiles (solo visual). */
-export const FLOOR_HEIGHT = 2;
+/**
+ * Altura de un piso de edificio, en tiles (solo visual). Un tile es ~1 metro y el personaje mide
+ * 1,6: con 3 por piso y al menos 2 pisos, el edificio más bajo ya dobla en altura al jugador.
+ */
+export const FLOOR_HEIGHT = 3;
 
 export const Tile = {
   Street: 0,
@@ -116,9 +119,9 @@ export function buildTileGrid(layout: CityLayout, rng: Rng): TileGrid {
 
       // Los edificios son más altos hacia el centro (el "downtown").
       const distToCenter = Math.hypot(bx - centerX, by - centerY) / Math.hypot(centerX, centerY);
-      const downtownBonus = Math.round((1 - distToCenter) * 3);
+      const downtownBonus = Math.round((1 - distToCenter) * 2);
       for (const lot of splitIntoLots(interior, rng)) {
-        buildings.push({ ...lot, floors: rng.int(1, 2) + downtownBonus });
+        buildings.push({ ...lot, floors: rng.int(2, 3) + downtownBonus });
       }
     }
   }

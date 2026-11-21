@@ -18,7 +18,7 @@ export type ZombieKind = 'walker' | 'tank';
  *  idle        quieto, balanceándose
  *  wander      deambula sin rumbo
  *  investigate va hacia un ruido que escuchó
- *  chase       persigue al jugador (lo vio, o es parte de una horda que "sabe" dónde está)
+ *  chase       persigue al jugador (lo está viendo, o lo vio hace muy poco)
  *  return      (tanque) vuelve a su puesto tras perder al jugador
  *  charge      (tanque) embestida en línea recta
  *  stunned     aturdido después de embestir
@@ -55,7 +55,10 @@ export interface Zombie {
   stagger: number;
   /** Destello blanco al recibir un golpe (solo visual). */
   hitFlash: number;
-  /** Las hordas persiguen sin necesidad de ver al jugador, hasta que se les acaba el tiempo. */
+  /**
+   * Hasta cuándo es parte de una horda. La horda NO sabe dónde estás: va al último ruido fuerte
+   * o a la zona donde te oyeron, y peina el área hasta que se le acaba el tiempo.
+   */
   hordeUntil: number;
   homeX: number;
   homeY: number;
@@ -70,9 +73,27 @@ export interface Corpse {
 
 /** Sucesos de un paso, para que el render y el HUD reaccionen (efectos, mensajes). No se guardan. */
 export type GameEvent =
-  | { type: 'shot'; fromX: number; fromY: number; toX: number; toY: number }
+  /** hit: qué paró la bala, para chispas en la pared o sangre en el zombie. */
+  | { type: 'shot'; fromX: number; fromY: number; toX: number; toY: number; hit: 'zombie' | 'wall' | 'none' }
   | { type: 'swing'; x: number; y: number; facing: number }
   | { type: 'blood'; x: number; y: number }
+  /**
+   * Un golpe que conectó: el render lo usa para salpicar sangre, soltar trozos, mostrar el
+   * número de daño y sacudir la cámara. dirX/dirY: hacia dónde fue empujado.
+   */
+  | {
+      type: 'hit';
+      x: number;
+      y: number;
+      dirX: number;
+      dirY: number;
+      damage: number;
+      killed: boolean;
+      /** Muerte violenta (crítico, escopeta de cerca, explosión): el cuerpo revienta. */
+      gib: boolean;
+      crit: boolean;
+      kind: ZombieKind;
+    }
   | { type: 'hurt'; damage: number }
   | { type: 'alarm'; x: number; y: number }
   /** Sonidos sueltos: la lógica solo avisa QUÉ sonó y DÓNDE; el audio decide cómo suena. */
@@ -112,6 +133,8 @@ export interface GameState {
   hordeTimer: number;
   /** "Calor" del ruido: cada disparo suma; si se acumula mucho, llega una horda antes. */
   noiseHeat: number;
+  /** El último ruido fuerte (disparo, alarma, explosión): las hordas van ahí, no a ti. */
+  lastNoise: { x: number; y: number; time: number };
   stats: GameStats;
   events: GameEvent[];
 }
