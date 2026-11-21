@@ -29,6 +29,8 @@ const SHAPES: Record<Zombie['kind'], [number, number]> = {
   screamer: [0.9, 1.12],
   spitter: [0.95, 0.92],
   tank: [1, 1],
+  // La sonámbula: alta y flaca.
+  sleeper: [0.78, 1.18],
 };
 const BURN_COLOR = new THREE.Color(0xff6a1a);
 /** Inclinación del que se arrastra (radianes hacia adelante). */
@@ -186,6 +188,12 @@ export class ZombieView {
       this.quaternion.multiply(this.tumble);
     }
     this.position.set(x, z.air + (crawling ? 0.12 : 0), y);
+    // La sonámbula tiembla más mientras más cerca está de despertar.
+    if (z.kind === 'sleeper' && z.agitation) {
+      const shake = z.agitation * z.agitation * 0.07;
+      this.position.x += Math.sin(this.time * 47 + z.id) * shake;
+      this.position.z += Math.cos(this.time * 41 + z.id) * shake;
+    }
     // Cada tipo con su silueta: el hinchado es ancho y bajo; el corredor, flaco; el gritón, alto.
     const shape = SHAPES[z.kind];
     // El acechador espera agazapado: más bajo y más ancho. Cuando arranca, se para.
@@ -206,6 +214,10 @@ export class ZombieView {
       this.color.setHex(0xffffff);
     } else if (z.kind === 'tank') {
       this.color.setHex(z.mode === 'stunned' ? 0x8a7d5a : z.mode === 'throw' ? 0x9a5040 : 0x6b5b4b);
+    } else if (z.kind === 'sleeper') {
+      // Pálida; despierta, se enrojece.
+      this.color.setHex(this.time < z.huntUntil ? 0xe0a090 : 0xd8d4c8);
+      if (z.agitation) this.color.lerp(BURN_COLOR, z.agitation * 0.35);
     } else if (z.kind === 'runner') {
       this.color.setHex(0x7a3a30);
     } else if (z.kind === 'bloater') {

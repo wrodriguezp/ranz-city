@@ -6,6 +6,7 @@
 //  1. Zombies sueltos repartidos por las calles, más densos donde el peligro es alto (zones.ts).
 //  2. Un TANQUE en un "paso obligado" de la ruta corta a cada salida.
 //  3. HORDAS DORMIDAS (grupos de 10-16) sobre la ruta alternativa, la larga.
+//  4. SONÁMBULAS (hasta 2) en tramos de la ruta corta: no se pelean, se pasan en sigilo.
 // Así cada salida ofrece la elección del pilar 3: atravesar al tanque por el camino corto, o
 // rodear por el largo y abrirse paso entre hordas.
 
@@ -17,7 +18,7 @@ import { dangerAt, edgeMidpoint, exitNodes, shortestPath, type ZoneMap } from '.
 export interface ZombieSpawn {
   x: number;
   y: number;
-  kind: 'walker' | 'runner' | 'bloater' | 'screamer' | 'spitter' | 'tank';
+  kind: 'walker' | 'runner' | 'bloater' | 'screamer' | 'spitter' | 'tank' | 'sleeper';
   /** Soldado del retén: con casco y chaleco, aguanta más del doble. */
   armored?: boolean;
 }
@@ -58,6 +59,8 @@ const BASE_DENSITY = 0.0042;
 const DANGER_DENSITY = 0.016;
 /** Los primeros tramos de la ruta nunca tienen tanque (no es justo encontrarlo de entrada). */
 const TANK_MIN_EDGE = 2;
+/** Sonámbulas en toda la ciudad. */
+const MAX_SLEEPERS = 2;
 
 export function planEncounters(
   grid: TileGrid,
@@ -97,6 +100,7 @@ export function planEncounters(
   const routes: RouteInfo[] = [];
   const tankEdges = new Set<string>();
   const hordeEdges = new Set<string>();
+  const sleeperEdges = new Set<string>();
   const key = (a: number, b: number) => (a < b ? `${a}-${b}` : `${b}-${a}`);
 
   layout.exits.forEach((exit, index) => {
@@ -158,6 +162,23 @@ export function planEncounters(
             }
           }
         }
+      }
+    }
+
+    // Una sonámbula en otro tramo de la ruta corta (no el del tanque ni uno de horda): la ruta
+    // corta pide pelear (el tanque) Y moverse con cuidado.
+    if (sleeperEdges.size < MAX_SLEEPERS) {
+      const free: [number, number][] = [];
+      for (let i = TANK_MIN_EDGE; i < short.length - 1; i++) {
+        const k = key(short[i], short[i + 1]);
+        if (!tankEdges.has(k) && !hordeEdges.has(k) && !sleeperEdges.has(k)) free.push([short[i], short[i + 1]]);
+      }
+      if (free.length > 0) {
+        const [a, b] = rng.pick(free);
+        sleeperEdges.add(key(a, b));
+        const mid = edgeMidpoint(graph, a, b);
+        const spot = freeSpot(mid.x, mid.y, 0.5, walkable) ?? mid;
+        zombies.push({ x: spot.x, y: spot.y, kind: 'sleeper' });
       }
     }
 

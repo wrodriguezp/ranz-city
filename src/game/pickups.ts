@@ -29,7 +29,7 @@ const MAX_PICKUPS = 60;
 export function dropFrom(state: GameState, z: Zombie): void {
   const items = rollDrop(state, z);
   if (items.length === 0) return;
-  const big = z.kind === 'tank';
+  const big = z.kind === 'tank' || z.kind === 'sleeper';
   state.pickups.push({ x: z.x, y: z.y, items, big });
   if (state.pickups.length > MAX_PICKUPS) state.pickups.shift();
   if (big) state.events.push({ type: 'message', text: 'Soltó un botín grande: recógelo', tone: 'good' });
@@ -71,6 +71,13 @@ function rollDrop(state: GameState, z: Zombie): LootItem[] {
         ...(state.weapon.suppressor ? [] : [{ type: 'suppressor' as const, amount: 1 }]),
       ];
     }
+    case 'sleeper':
+      return [
+        { type: 'medkit', amount: 1 },
+        { type: 'ammo', amount: 40 },
+        { type: 'battery', amount: 1 },
+        state.weapon.suppressor || r() < 0.5 ? { type: 'katana', amount: 1 } : { type: 'suppressor', amount: 1 },
+      ];
   }
 }
 

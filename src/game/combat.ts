@@ -450,7 +450,7 @@ function swing(state: GameState, rt: ZombieRuntime): void {
     // Un zombie común que todavía no te persigue, golpeado agachado: ejecución de un golpe.
     // Con un arma que corta, la ejecución es una decapitación.
     const unaware = z.mode !== 'chase' && z.mode !== 'charge';
-    if (player.sneaking && unaware && z.kind !== 'tank') {
+    if (player.sneaking && unaware && z.kind !== 'tank' && z.kind !== 'sleeper') {
       damageZombie(state, z, z.hp, nx * 2, ny * 2, 0, { behead: spec.sever > 0 });
       state.events.push({ type: 'sfx', name: 'takedown', x: z.x, y: z.y });
     } else {

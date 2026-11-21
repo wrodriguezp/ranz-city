@@ -275,6 +275,9 @@ export class Sfx {
       case 'scream':
         this.scream(this.place(x, y, l, 1, 70));
         break;
+      case 'murmur':
+        this.murmur(this.place(x, y, l, 0.7, 24));
+        break;
       case 'weapon':
         this.click(this.place(x, y, l, 0.6), 0, 1400);
         this.click(this.place(x, y, l, 0.6), 0.12, 2400);
@@ -612,6 +615,35 @@ export class Sfx {
   private breath(out: AudioNode | null): void {
     if (!out) return;
     this.burst(out, 0, 0.45, 'bandpass', 650, 0.35, 0.8);
+  }
+
+/** Murmullo de la sonámbula: un susurro (ruido filtrado) y un quejido agudo que tiembla. */
+  private murmur(out: AudioNode | null): void {
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const duration = 1.2 + Math.random() * 0.6;
+    const f = this.burst(out, 0, duration, 'bandpass', 1400, 0.18, 3);
+    f.frequency.linearRampToValueAtTime(900, t + duration);
+    const osc = ctx.createOscillator();
+    osc.type = 'triangle';
+    const base = 260 + Math.random() * 60;
+    osc.frequency.setValueAtTime(base, t);
+    osc.frequency.linearRampToValueAtTime(base * 0.8, t + duration);
+    const lfo = ctx.createOscillator();
+    lfo.frequency.value = 7;
+    const depth = ctx.createGain();
+    depth.gain.value = base * 0.04;
+    lfo.connect(depth).connect(osc.frequency);
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(0.08, t + 0.3);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    osc.connect(env).connect(out);
+    osc.start(t);
+    lfo.start(t);
+    osc.stop(t + duration + 0.05);
+    lfo.stop(t + duration + 0.05);
   }
 
   /** Gruñido: diente de sierra grave con vibrato, filtrado. "angry" = más fuerte y más agudo. */

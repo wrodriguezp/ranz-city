@@ -60,6 +60,8 @@ const STATS: Record<
   screamer: { hp: 70, radius: 0.33, minSpeed: 2.8, maxSpeed: 3.3, damage: 4, cooldown: 1, reach: 0.4 },
   spitter: { hp: 80, radius: 0.34, minSpeed: 2.6, maxSpeed: 3.0, damage: 4, cooldown: 1.1, reach: 0.4 },
   tank: { hp: 1100, radius: 0.8, minSpeed: 2.1, maxSpeed: 2.1, damage: 30, cooldown: 1.6, reach: 0.55 },
+  // La sonámbula: camina despacio dormida; despierta, corre más que tú y pega fuerte.
+  sleeper: { hp: 420, radius: 0.36, minSpeed: 1, maxSpeed: 1, damage: 30, cooldown: 0.8, reach: 0.5 },
 };
 
 /** Gravedad para los zombies que salen volando (igual que la de las granadas). */
@@ -130,6 +132,109 @@ const TANK_RAGE = 35;
 /** Velocidad del tanque enfurecido: viéndote y sin verte (el jugador corre a 5.5). */
 const TANK_RAGE_SPEED = 3.3;
 const TANK_HUNT_SPEED = 4.6;
+
+// --- La sonámbula ---------------------------------------------------------------------------
+// Ciega y dormida, camina despacio por su tramo murmurando. No te ve: te OYE y SIENTE la luz.
+// Pasar a su lado corriendo o con la linterna encima la despierta; agachado y con la luz
+// apagada se puede pasar. Despierta grita (llama a los de alrededor) y te caza un rato corriendo
+// más rápido que tú: o la peleas (420 de vida) o te escondes hasta que se calme.
+
+/** Velocidad dormida y despierta viéndote (el jugador corre a 5.5: en línea recta te alcanza). */
+const SLEEPER_PACE = 0.6;
+const SLEEPER_RAGE_SPEED = 6.2;
+/** Sin verte va más lento que tú: cortarle la línea de visión (una esquina, el dash) te salva. */
+const SLEEPER_HUNT_SPEED = 4.2;
+/** Segundos que te caza al despertar. Después se calma donde esté. */
+const SLEEPER_RAGE = 30;
+/** Hasta dónde oye tus pasos (sin agacharte) y tus pasos agachado. */
+const SLEEPER_STEPS = 9;
+const SLEEPER_SNEAK_STEPS = 3;
+/** La linterna encima la molesta hasta esta distancia, si el cono le apunta. */
+const SLEEPER_LIGHT = 14;
+const SLEEPER_LIGHT_CONE = 0.35;
+/** Cuánto baja la agitación por segundo si la dejas tranquila. */
+const SLEEPER_CALM = 0.12;
+/** Distancia a la que el HUD avisa que hay una cerca (y cada cuánto lo repite). */
+const SLEEPER_HINT = 15;
+const SLEEPER_HINT_EVERY = 30;
+
+function thinkSleeper(state: GameState, rt: ZombieRuntime, z: Zombie, dist: number, toX: number, toY: number): void {
+  const thinkDt = THINK_EVERY / 60;
+  const player = state.player;
+  // Recién se calmó después de cazarte: se queda dormida donde está.
+  if (z.mode !== 'wander' && z.mode !== 'idle') {
+    z.mode = 'wander';
+    z.homeX = z.x;
+    z.homeY = z.y;
+    z.agitation = 0;
+    if (dist < 25) state.events.push({ type: 'message', text: 'La sonámbula se volvió a dormir', tone: 'good' });
+  }
+  z.seesPlayer = false;
+
+  // ¿Qué la molesta? (todo suma por segundo)
+  const moving = Math.hypot(player.x - player.prevX, player.y - player.prevY) > 0.005;
+  let gain = 0;
+  if (moving && !player.sneaking && dist < SLEEPER_STEPS) gain += 0.15 + 0.75 * (1 - dist / SLEEPER_STEPS);
+  if (moving && player.sneaking && dist < SLEEPER_SNEAK_STEPS) gain += 0.35 * (1 - dist / SLEEPER_SNEAK_STEPS);
+  if (dist < 1.4) gain += 1.5; // chocarla
+  const light = flashlightPower(state.flashlight, state.time);
+  if (light > 0.5 && dist < SLEEPER_LIGHT && angleBetween(player.facing, Math.atan2(-toY, -toX)) < SLEEPER_LIGHT_CONE) {
+    if (lineOfSight(rt.city.grid, z.x, z.y, player.x, player.y)) gain += 0.5;
+  }
+  if (gain > 0) agitate(state, rt, z, gain * thinkDt);
+  else z.agitation = Math.max(0, (z.agitation ?? 0) - SLEEPER_CALM * thinkDt);
+  if (state.time < z.huntUntil) return; // despertó recién
+
+  // Agitada, se detiene y gira la cabeza hacia ti: es la advertencia.
+  if ((z.agitation ?? 0) > 0.45) {
+    z.mode = 'idle';
+    z.facing = turnToward(z.facing, Math.atan2(toY, toX), 1.5 * thinkDt);
+  } else {
+    z.mode = 'wander';
+    z.timer -= thinkDt;
+    const hx = z.homeX - z.x;
+    const hy = z.homeY - z.y;
+    // Va y viene por su tramo: si se alejó mucho de su puesto, da la vuelta.
+    if (Math.hypot(hx, hy) > 4) z.facing = Math.atan2(hy, hx);
+    else if (z.timer <= 0) {
+      z.facing = random(state) * Math.PI * 2;
+      z.timer = randomRange(state, 3, 7);
+    }
+  }
+
+  // Murmura: es lo que te avisa que está ahí antes de verla.
+  z.ability -= thinkDt;
+  if (z.ability <= 0 && dist < 22) {
+    z.ability = randomRange(state, 2.5, 4.5);
+    state.events.push({ type: 'sfx', name: 'murmur', x: z.x, y: z.y });
+  }
+  if (dist < SLEEPER_HINT && state.time - (z.hintAt ?? -999) > SLEEPER_HINT_EVERY) {
+    z.hintAt = state.time;
+    state.events.push({
+      type: 'message',
+      text: 'Una sonámbula murmura cerca: agáchate [Shift] y apaga la linterna [F] para pasar',
+      tone: 'danger',
+    });
+  }
+}
+
+function agitate(state: GameState, rt: ZombieRuntime | undefined, z: Zombie, amount: number): void {
+  z.agitation = Math.min(1, (z.agitation ?? 0) + amount);
+  if (z.agitation >= 1) wakeSleeper(state, rt, z);
+}
+
+function wakeSleeper(state: GameState, rt: ZombieRuntime | undefined, z: Zombie): void {
+  z.agitation = 0;
+  z.huntUntil = state.time + SLEEPER_RAGE;
+  z.mode = 'chase';
+  z.lastSeenAt = state.time;
+  z.targetX = state.player.x;
+  z.targetY = state.player.y;
+  state.events.push({ type: 'sfx', name: 'scream', x: z.x, y: z.y });
+  state.events.push({ type: 'message', text: '¡La sonámbula DESPERTÓ! Pelea o escóndete', tone: 'danger' });
+  // Su grito despierta a los de alrededor.
+  makeNoise(state, z.x, z.y, 16, rt);
+}
 /** Después de una horda, segundos en los que el ruido no trae otra. */
 const HORDE_RELAX = 50;
 /** Si despejas una horda (matas casi todos), el director te da este respiro extra. */
@@ -157,7 +262,7 @@ export function createZombie(state: GameState, x: number, y: number, kind: Zombi
     maxHp: stats.hp,
     radius: stats.radius,
     speed: randomRange(state, stats.minSpeed, stats.maxSpeed),
-    mode: kind === 'tank' ? 'idle' : random(state) < 0.5 ? 'idle' : 'wander',
+    mode: kind === 'tank' ? 'idle' : kind === 'sleeper' ? 'wander' : random(state) < 0.5 ? 'idle' : 'wander',
     timer: randomRange(state, 1, 5),
     targetX: x,
     targetY: y,
@@ -174,7 +279,8 @@ export function createZombie(state: GameState, x: number, y: number, kind: Zombi
     homeY: y,
     air: 0,
     airV: 0,
-    ability: kind === 'tank' ? 4 : kind === 'spitter' ? 2 : 0,
+    ability: kind === 'tank' ? 4 : kind === 'spitter' ? 2 : kind === 'sleeper' ? randomRange(state, 0, 3) : 0,
+    agitation: kind === 'sleeper' ? 0 : undefined,
     limbs: 0,
     burn: 0,
   };
@@ -185,7 +291,7 @@ export function createZombie(state: GameState, x: number, y: number, kind: Zombi
  * aparte (al armar la partida, entre los que empiezan en un cruce).
  */
 function pickRole(state: GameState, kind: ZombieKind): ZombieRole {
-  if (kind === 'tank') return 'chaser';
+  if (kind === 'tank' || kind === 'sleeper') return 'chaser';
   const r = random(state);
   if (kind === 'runner') return r < 0.6 ? 'chaser' : 'flanker';
   return r < 0.35 ? 'chaser' : r < 0.72 ? 'surround' : 'flanker';
@@ -225,6 +331,11 @@ export function makeNoise(state: GameState, x: number, y: number, radius: number
   // se te viene encima por todos lados, solo llegan las oleadas por el embudo.
   if (state.escape.defense) heard = Math.min(heard, DEFENSE_HEARING);
   for (const z of state.zombies) {
+    if (z.kind === 'sleeper' && state.time >= z.huntUntil) {
+      const d = Math.hypot(z.x - x, z.y - y);
+      if (d < heard) agitate(state, rt, z, 0.25 + 0.8 * (1 - d / heard));
+      continue;
+    }
     // El tanque está "de guardia": oye menos.
     const r = z.kind === 'tank' ? heard * 0.6 : heard;
     const d = Math.hypot(z.x - x, z.y - y);
@@ -296,6 +407,7 @@ export function damageZombie(
       kind: z.kind,
     });
   }
+  if (z.kind === 'sleeper' && state.time >= z.huntUntil && z.hp > 0) wakeSleeper(state, undefined, z);
   // Golpearlo lo despierta aunque no te haya visto. De cerca sabe de dónde vino; de lejos
   // (una bala desde la oscuridad) solo sabe la dirección aproximada: va a investigar.
   // El fuego no le dice nada de dónde estás.
@@ -417,6 +529,7 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
           // El tanque enfurecido acelera, y más cuando te pierde de vista: doblar una esquina
           // no alcanza para perderlo. (Igual eres más rápido corriendo: hay que alejarse de verdad.)
           if (z.kind === 'tank' && state.time < z.huntUntil) speed = z.seesPlayer ? TANK_RAGE_SPEED : TANK_HUNT_SPEED;
+          if (z.kind === 'sleeper') speed = z.seesPlayer ? SLEEPER_RAGE_SPEED : SLEEPER_HUNT_SPEED;
           if (dist < 1.6) {
             vx = (toX / (dist || 1)) * speed;
             vy = (toY / (dist || 1)) * speed;
@@ -460,10 +573,12 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
           }
           break;
         }
-        case 'wander':
-          vx = Math.cos(z.facing) * WANDER_SPEED;
-          vy = Math.sin(z.facing) * WANDER_SPEED;
+        case 'wander': {
+          const ws = z.kind === 'sleeper' ? SLEEPER_PACE : WANDER_SPEED;
+          vx = Math.cos(z.facing) * ws;
+          vy = Math.sin(z.facing) * ws;
           break;
+        }
         case 'return': {
           const hx = z.homeX - z.x;
           const hy = z.homeY - z.y;
@@ -608,6 +723,7 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
       z.mode !== 'charge' &&
       pd < touch + STATS[z.kind].reach &&
       z.attackCooldown <= 0 &&
+      (z.kind !== 'sleeper' || state.time < z.huntUntil) &&
       // Sin brazos no puede agarrarte: solo empuja.
       (z.limbs & (LIMB_ARM_L | LIMB_ARM_R)) !== (LIMB_ARM_L | LIMB_ARM_R)
     ) {
@@ -646,6 +762,10 @@ function think(
   lampSight: number,
 ): void {
   const thinkDt = THINK_EVERY / 60;
+  if (z.kind === 'sleeper' && state.time >= z.huntUntil) {
+    thinkSleeper(state, rt, z, dist, toX, toY);
+    return;
+  }
   const sneaking = state.player.sneaking;
   const hunting = state.time < z.hordeUntil;
   // Dos fuentes de luz te delatan: tu linterna y los faroles. Vale la que más te expone.

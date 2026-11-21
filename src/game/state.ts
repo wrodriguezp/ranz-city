@@ -24,7 +24,7 @@ import type { LootItem } from '../world/props';
  *  spitter  escupidor: se queda a distancia y te escupe ácido que deja un charco
  *  tank     el jefe del paso obligado: embiste y lanza escombros
  */
-export type ZombieKind = 'walker' | 'runner' | 'bloater' | 'screamer' | 'spitter' | 'tank';
+export type ZombieKind = 'walker' | 'runner' | 'bloater' | 'screamer' | 'spitter' | 'tank' | 'sleeper';
 
 /**
  * Miembros perdidos de un zombie, como máscara de bits (un número: se serializa sin problema).
@@ -113,6 +113,13 @@ export interface Zombie {
   horde?: number;
   /** Soldado del retén militar (más vida; casco y chaleco al dibujarlo). */
   armored?: boolean;
+  /**
+   * La sonámbula: qué tan cerca está de despertar (0..1). Sube con tus pasos, tu linterna y los
+   * ruidos; baja sola si la dejas tranquila. Al llegar a 1, despierta (ver zombies.ts).
+   */
+  agitation?: number;
+  /** Cuándo se avisó por última vez en pantalla que hay una sonámbula cerca. */
+  hintAt?: number;
   /** Enfriamiento de la habilidad especial (grito, lanzamiento del tanque). */
   ability: number;
   /** Miembros perdidos (ver LIMB_*). */
@@ -312,6 +319,7 @@ export interface GameState {
 }
 
 export type SfxName =
+  | 'murmur'
   | 'step'
   | 'reload'
   | 'empty'
