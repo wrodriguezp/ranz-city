@@ -166,7 +166,7 @@ export function createWeapons(): WeaponState {
     current: 'pistol',
     owned: { melee: true, pistol: true, shotgun: false, smg: false, minigun: false, flamer: false, rocket: false },
     mags: { pistol: GUNS.pistol.mag, shotgun: 0, smg: 0, minigun: 0, flamer: 0, rocket: 0 },
-    ammo: { light: 24, shells: 0 },
+    ammo: { light: STARTING_LIGHT, shells: 0 },
     cooldown: 0,
     reloadTimer: 0,
     melee: 'bat',
@@ -174,6 +174,27 @@ export function createWeapons(): WeaponState {
     flameCount: 0,
     suppressor: false,
   };
+}
+
+/**
+ * Arma inicial al azar (con el azar del estado, así la misma seed da la misma arma): la pistola
+ * siempre va de respaldo, y además una escopeta o un subfusil con munición de sobra, para
+ * poder pelear desde el primer minuto.
+ */
+const STARTING_LIGHT = 60;
+const STARTING_GUNS: { id: GunId; light: number; shells: number }[] = [
+  { id: 'shotgun', light: 0, shells: 18 },
+  { id: 'smg', light: 90, shells: 0 },
+];
+
+export function startingLoadout(weapon: WeaponState, roll: number): GunId {
+  const pick = STARTING_GUNS[Math.floor(roll * STARTING_GUNS.length)];
+  weapon.owned[pick.id] = true;
+  weapon.mags[pick.id] = GUNS[pick.id].mag;
+  weapon.ammo.light += pick.light;
+  weapon.ammo.shells += pick.shells;
+  weapon.current = pick.id;
+  return pick.id;
 }
 
 export function isGun(id: WeaponId): id is GunId {

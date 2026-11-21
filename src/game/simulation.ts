@@ -11,7 +11,7 @@ import { createEscape, radioExitAt, updateEscape } from './escape';
 import { createDirector } from './zombies';
 import { createLoot, updateLoot } from './loot';
 import { updatePickups } from './pickups';
-import { createWeapons, updateCombat, type CombatIntent } from './combat';
+import { createWeapons, startingLoadout, updateCombat, type CombatIntent } from './combat';
 import { updateExplosives } from './explosives';
 import { updateHazards } from './hazards';
 import { BLOCK_SIZE, STREET_WIDTH, Tile } from '../world/tileGrid';
@@ -103,6 +103,8 @@ export function createGameState(city: City): GameState {
     stats: { kills: 0, shots: 0, hordes: 0 },
     events: [],
   };
+  // Arma inicial al azar (ver startingLoadout).
+  startingLoadout(state.weapon, random(state));
   applyBarrels(city, state.barrelsBlown);
   for (const spawn of city.encounters.zombies) {
     const z = createZombie(state, spawn.x, spawn.y, spawn.kind);
