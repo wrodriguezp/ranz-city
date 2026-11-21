@@ -56,9 +56,14 @@ class PieceBatch {
 
 export interface BlocksView {
   root: THREE.Group;
-  /** Fogatas que titilan. */
-  update(time: number): void;
+  /** Fogatas y autos en llamas que titilan, humo que sube. (x, y): el jugador, para la luz del fuego. */
+  update(time: number, x?: number, y?: number): void;
 }
+
+const SMOKE_PER_FIRE = 12;
+const FLAMES_PER_CAR = 4;
+/** La luz del fuego (una sola, va al auto en llamas más cercano al jugador). */
+const FIRE_LIGHT_RANGE = 40;
 
 export function buildBlocksView(city: City): BlocksView {
   const root = new THREE.Group();
@@ -235,14 +240,135 @@ export function buildBlocksView(city: City): BlocksView {
   floors.receiveShadow = true;
   root.add(floors);
 
+  // 7. Flechas de supervivientes: pintadas en la calle, apuntando hacia la salida más cercana.
+  if (city.decor.graffiti.length) {
+    const arrow = new THREE.Shape();
+    // Flecha apuntando a +x en el plano del dibujo (cola, cuerpo y punta).
+    arrow.moveTo(-1.3, -0.22);
+    arrow.lineTo(0.3, -0.22);
+    arrow.lineTo(0.3, -0.6);
+    arrow.lineTo(1.3, 0);
+    arrow.lineTo(0.3, 0.6);
+    arrow.lineTo(0.3, 0.22);
+    arrow.lineTo(-1.3, 0.22);
+    const arrowGeo = new THREE.ShapeGeometry(arrow);
+    arrowGeo.rotateX(-Math.PI / 2);
+    const arrows = new THREE.InstancedMesh(
+      arrowGeo,
+      new THREE.MeshStandardMaterial({ roughness: 0.9, polygonOffset: true, polygonOffsetFactor: -2 }),
+      city.decor.graffiti.length,
+    );
+    const m = new THREE.Matrix4();
+    const q = new THREE.Quaternion();
+    const color = new THREE.Color();
+    city.decor.graffiti.forEach((g, i) => {
+      // Girar en Y por -ángulo lleva el +x de la flecha a la dirección (cos, sin) de la grilla (x, z).
+      q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), -g.angle);
+      m.compose(new THREE.Vector3(g.x, 0.03, g.y), q, new THREE.Vector3(1.2, 1, 1.2));
+      arrows.setMatrixAt(i, m);
+      arrows.setColorAt(i, color.setHex(g.color));
+    });
+    arrows.receiveShadow = true;
+    root.add(arrows);
+  }
+
+  // 8. Basura en las veredas (bolsas y cajas aplastadas).
+  if (city.decor.trash.length) {
+    const trash = new PieceBatch();
+    for (const t of city.decor.trash) trash.add(t.x, 0.15, t.y, t.size * 1.4, t.size * 0.6, t.size, t.angle, t.color);
+    const trashMesh = trash.build(box, new THREE.MeshStandardMaterial({ roughness: 0.9 }));
+    trashMesh.receiveShadow = true;
+    root.add(trashMesh);
+  }
+
+  // 9. Autos en llamas: llamas (conos que titilan), resplandor en el piso y una columna de humo.
+  //    El humo no guarda estado: la fase de cada bocanada sale del tiempo, así sube y se repite sola.
+  const burning = city.decor.burning;
+  const flameGeo = new THREE.ConeGeometry(0.35, 1, 6);
+  flameGeo.translate(0, 0.5, 0);
+  const flames = new THREE.InstancedMesh(
+    flameGeo,
+    new THREE.MeshBasicMaterial({ color: 0xff7a1a, transparent: true, opacity: 0.85, blending: THREE.AdditiveBlending, depthWrite: false }),
+    Math.max(1, burning.length * FLAMES_PER_CAR),
+  );
+  flames.count = burning.length * FLAMES_PER_CAR;
+  const smoke = new THREE.InstancedMesh(
+    new THREE.IcosahedronGeometry(1, 0),
+    new THREE.MeshBasicMaterial({ color: 0x262626, transparent: true, opacity: 0.45, depthWrite: false }),
+    Math.max(1, burning.length * SMOKE_PER_FIRE),
+  );
+  smoke.count = burning.length * SMOKE_PER_FIRE;
+  // Las instancias se mueven cada cuadro: sin esto, three.js las recorta con la esfera inicial.
+  flames.frustumCulled = false;
+  smoke.frustumCulled = false;
+  const fireGlows: THREE.Mesh[] = [];
+  const fireGlowMaterial = glowMaterial.clone();
+  fireGlowMaterial.color.setHex(0xff5a14);
+  for (const b of burning) {
+    const glow = new THREE.Mesh(glowGeo, fireGlowMaterial);
+    glow.position.set(b.x, 0.05, b.y);
+    glow.scale.setScalar(3.5);
+    root.add(glow);
+    fireGlows.push(glow);
+  }
+  // Las llamas salen de distintos puntos del auto (offsets fijos por seed).
+  const flameSpots = burning.flatMap(() =>
+    Array.from({ length: FLAMES_PER_CAR }, () => ({ dx: (rng.float() - 0.5) * 1.8, dz: (rng.float() - 0.5) * 0.9, phase: rng.float() * 10 })),
+  );
+  const fireLight = new THREE.PointLight(0xff7a2a, 0, 13, 1.4);
+  fireLight.position.y = 2.2;
+  if (burning.length) root.add(fireLight, flames, smoke);
+  const fm = new THREE.Matrix4();
+  const fq = new THREE.Quaternion();
+  const fpos = new THREE.Vector3();
+  const fscale = new THREE.Vector3();
+  const up = new THREE.Vector3(0, 1, 0);
+
   return {
     root,
-    update(time: number) {
+    update(time: number, px?: number, py?: number) {
       for (const f of fires) {
         // Dos senos de frecuencias que no encajan: titila sin repetirse a simple vista.
         const flicker = 0.75 + 0.15 * Math.sin(time * 9 + f.phase) + 0.1 * Math.sin(time * 23.7 + f.phase * 2);
         f.glow.scale.setScalar(1.4 + flicker * 0.5);
       }
+      if (!burning.length) return;
+      let nearest = -1;
+      let best = FIRE_LIGHT_RANGE;
+      burning.forEach((car, i) => {
+        fireGlows[i].scale.setScalar(3.2 + 0.5 * Math.sin(time * 7 + i) + 0.3 * Math.sin(time * 19 + i * 3));
+        for (let k = 0; k < FLAMES_PER_CAR; k++) {
+          const s = flameSpots[i * FLAMES_PER_CAR + k];
+          const h = 0.9 + 0.5 * Math.sin(time * 11 + s.phase) + 0.3 * Math.sin(time * 27 + s.phase);
+          fm.compose(fpos.set(car.x + s.dx, 0.8, car.y + s.dz), fq.identity(), fscale.set(1, Math.max(0.3, h), 1));
+          flames.setMatrixAt(i * FLAMES_PER_CAR + k, fm);
+        }
+        for (let k = 0; k < SMOKE_PER_FIRE; k++) {
+          // Fase 0→1: la bocanada nace sobre el auto, sube, crece y se ladea con el "viento".
+          const p = (time * 0.18 + k / SMOKE_PER_FIRE + i * 0.37) % 1;
+          const size = 0.5 + p * 2.2;
+          fm.compose(
+            fpos.set(car.x + p * 3.5 + Math.sin(k * 7.1) * 0.4, 1.4 + p * 9, car.y - p * 2 + Math.cos(k * 3.3) * 0.4),
+            fq.setFromAxisAngle(up, k + time * 0.3),
+            fscale.set(size, size * 0.8, size),
+          );
+          smoke.setMatrixAt(i * SMOKE_PER_FIRE + k, fm);
+        }
+        if (px !== undefined && py !== undefined) {
+          const d = Math.hypot(car.x - px, car.y - py);
+          if (d < best) {
+            best = d;
+            nearest = i;
+          }
+        }
+      });
+      flames.instanceMatrix.needsUpdate = true;
+      smoke.instanceMatrix.needsUpdate = true;
+      if (nearest >= 0) {
+        fireLight.position.x = burning[nearest].x;
+        fireLight.position.z = burning[nearest].y;
+        fireLight.intensity = 9 + 2.5 * Math.sin(time * 13) + 1.5 * Math.sin(time * 31);
+      } else fireLight.intensity = 0;
     },
   };
 }

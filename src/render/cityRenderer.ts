@@ -45,7 +45,7 @@ export interface CityView {
    */
   updateOcclusion(playerX?: number, playerY?: number, toCamera?: THREE.Vector3): void;
   /** Animaciones del escenario (fogatas). */
-  update(time: number): void;
+  update(time: number, playerX?: number, playerY?: number): void;
   dispose(): void;
 }
 

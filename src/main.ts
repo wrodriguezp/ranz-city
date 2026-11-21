@@ -139,7 +139,7 @@ function loadCity(seedText: string): void {
     scene.remove(propsView.root);
     propsView.dispose();
   }
-  propsView = new PropsView(city.props);
+  propsView = new PropsView(city.props, new Set(city.decor.burning.map((b) => b.id)));
   scene.add(propsView.root);
   if (explosivesView) {
     scene.remove(explosivesView.root);
@@ -333,7 +333,7 @@ function frame(now: number): void {
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
-    cityView?.update(now / 1000);
+    cityView?.update(now / 1000, x, y);
     // Los eventos de los pasos de este cuadro: efectos y mensajes, y después se descartan.
     const axes = gameCamera.screenAxesOnGround();
     const listener = { x, y, rightX: axes.rightX, rightY: axes.rightY };
@@ -359,6 +359,7 @@ function frame(now: number): void {
     zombieView.update(state, city.grid, state.player.x, state.player.y, 1);
     explosivesView?.update(state, now / 1000);
     cityView?.updateOcclusion();
+    cityView?.update(now / 1000);
     reviewControls.update();
     renderer.render(scene, reviewCamera);
   }

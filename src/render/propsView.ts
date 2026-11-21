@@ -30,7 +30,11 @@ export class PropsView {
   private readonly geometries: THREE.BufferGeometry[] = [];
   private readonly materials: THREE.Material[] = [];
 
-  constructor(private readonly containers: readonly Container[]) {
+  constructor(
+    private readonly containers: readonly Container[],
+    /** Autos que se están quemando: carrocería carbonizada. */
+    burnt: ReadonlySet<number> = new Set(),
+  ) {
     const cars = containers.filter((c) => c.kind === 'car');
     const crates = containers.filter((c) => c.kind === 'crate');
     const bodies = containers.filter((c) => c.kind === 'body');
@@ -47,7 +51,7 @@ export class PropsView {
       const m = this.compose(c.x + c.w / 2, 0, c.y + c.h / 2, -c.angle);
       bodyMesh.setMatrixAt(i, m);
       cabinMesh.setMatrixAt(i, m);
-      bodyMesh.setColorAt(i, new THREE.Color(CAR_COLORS[c.variant % CAR_COLORS.length]));
+      bodyMesh.setColorAt(i, new THREE.Color(burnt.has(c.id) ? 0x1a1714 : CAR_COLORS[c.variant % CAR_COLORS.length]));
     });
 
     // Cajas de madera (las de la plaza, verdes y militares).

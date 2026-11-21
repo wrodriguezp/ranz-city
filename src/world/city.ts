@@ -11,6 +11,7 @@ import { BLOCK_SIZE, blockStart, buildTileGrid, nodeCenter, type TileGrid } from
 import { planEvacuation, type EvacPoint } from './evacuation';
 import { placeBarrels, placeProps, type Barrel, type Container } from './props';
 import { placeStreetLights, type LightMap } from './streetLights';
+import { placeDecor, type Decor } from './decor';
 import { computeZones, dangerAt, type ZoneMap } from './zones';
 
 export interface City {
@@ -32,6 +33,8 @@ export interface City {
   lights: LightMap;
   /** Zonas de evacuación con su hora límite. */
   evac: EvacPoint[];
+  /** Flechas de supervivientes, autos en llamas y basura (solo se ven). */
+  decor: Decor;
   /** Huella de la ciudad generada, para comprobar a simple vista que la generación es determinista. */
   fingerprint: string;
 }
@@ -67,8 +70,10 @@ export function generateCity(seedText: string): City {
 
   const evac = planEvacuation(layout);
   const lights = placeStreetLights(grid, layout, rng.fork('lights'));
+  // Va después de los props porque algunos autos se queman (y pierden su loot).
+  const decor = placeDecor(grid, layout, props, spawn, rng.fork('decor'));
 
-  return { seedText, seed, layout, grid, spawn, encounters, zones, props, barrels, lights, evac, fingerprint: fingerprintOf(grid) };
+  return { seedText, seed, layout, grid, spawn, encounters, zones, props, barrels, lights, evac, decor, fingerprint: fingerprintOf(grid) };
 }
 
 /** Hash FNV-1a de los tiles y las alturas de los edificios. */
