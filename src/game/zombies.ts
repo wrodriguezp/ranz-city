@@ -28,6 +28,7 @@ import { queueBlast, throwAcid, throwRock } from './explosives';
 import { flashlightPower } from './flashlight';
 import type { FlowField } from './flowField';
 import { PLAYER_RADIUS } from './player';
+import { dropFrom } from './pickups';
 import { random, randomRange } from './random';
 import type { SpatialHash } from './spatialHash';
 import { LIMB_ARM_L, LIMB_ARM_R, LIMB_LEGS, type GameState, type Zombie, type ZombieKind, type ZombieRole } from './state';
@@ -124,6 +125,11 @@ export const MAX_ZOMBIES = 450;
 const HORDE_FIRST = 90;
 const HORDE_INTERVAL = 100;
 const HORDE_HEAT_LIMIT = 22;
+/** Segundos que el tanque te sigue cazando desde la última vez que te vio. */
+const TANK_RAGE = 35;
+/** Velocidad del tanque enfurecido: viéndote y sin verte (el jugador corre a 5.5). */
+const TANK_RAGE_SPEED = 3.3;
+const TANK_HUNT_SPEED = 4.6;
 /** Después de una horda, segundos en los que el ruido no trae otra. */
 const HORDE_RELAX = 50;
 /** Si despejas una horda (matas casi todos), el director te da este respiro extra. */
@@ -312,6 +318,7 @@ export function damageZombie(
     state.corpses.push({ x: z.x, y: z.y, facing: z.facing, kind: z.kind });
     if (state.corpses.length > 300) state.corpses.shift();
     if (z.kind === 'tank') state.events.push({ type: 'message', text: '¡Cayó el tanque!', tone: 'good' });
+    dropFrom(state, z);
     return true;
   }
   return false;
@@ -406,7 +413,10 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
       switch (z.mode) {
         case 'chase': {
           // El acechador arranca con todo cuando te ve (ability = segundos de arranque que quedan).
-          const speed = z.role === 'ambusher' && z.ability > 0 ? z.speed * AMBUSH_SPEED : z.speed;
+          let speed = z.role === 'ambusher' && z.ability > 0 ? z.speed * AMBUSH_SPEED : z.speed;
+          // El tanque enfurecido acelera, y más cuando te pierde de vista: doblar una esquina
+          // no alcanza para perderlo. (Igual eres más rápido corriendo: hay que alejarse de verdad.)
+          if (z.kind === 'tank' && state.time < z.huntUntil) speed = z.seesPlayer ? TANK_RAGE_SPEED : TANK_HUNT_SPEED;
           if (dist < 1.6) {
             vx = (toX / (dist || 1)) * speed;
             vy = (toY / (dist || 1)) * speed;
@@ -664,6 +674,12 @@ function think(
       z.mode = 'chase';
       z.timer = z.kind === 'tank' ? 1.5 : 0;
       if (z.role === 'ambusher') z.ability = AMBUSH_BURST;
+    }
+    if (z.kind === 'tank') {
+      if (state.time >= z.huntUntil) {
+        state.events.push({ type: 'message', text: '¡El tanque te vio! No te va a soltar fácil', tone: 'danger' });
+      }
+      z.huntUntil = state.time + TANK_RAGE;
     }
     if (z.kind === 'screamer' && z.ability <= 0) scream(state, rt, z);
     if (z.kind === 'spitter' && z.ability <= 0 && dist > SPIT_MIN && dist < SPIT_MAX && z.stagger <= 0) {

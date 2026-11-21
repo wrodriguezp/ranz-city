@@ -1,3 +1,4 @@
+import type { Pickup } from './pickups';
 // Estado DINÁMICO de la partida: todo lo que cambia mientras se juega.
 //
 // Regla del proyecto: la seed genera solo el mundo estático (City). Esto es lo otro, y se guarda
@@ -282,6 +283,8 @@ export interface GameState {
   hazards: Hazard[];
   lures: Lure[];
   drops: SupplyDrop[];
+  /** Lo que soltaron los zombies al morir (ver pickups.ts). */
+  pickups: Pickup[];
   /** alarmsFired[id] = true si la alarma de ese auto (city.props[id]) ya sonó. */
   alarmsFired: boolean[];
   corpses: Corpse[];

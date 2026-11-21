@@ -13,6 +13,8 @@ import type { EffectsView } from './effectsView';
 const MAX_HAZARDS = 40;
 const MAX_LURES = 16;
 const MAX_DROPS = 4;
+/** Bolsas que sueltan los zombies (ver game/pickups.ts). */
+const MAX_PICKUPS = 60;
 /** Altura desde la que se ve caer el suministro. */
 const DROP_HEIGHT = 22;
 
@@ -25,6 +27,8 @@ export class HazardsView {
   private readonly glows: THREE.InstancedMesh;
   private readonly crates: THREE.InstancedMesh;
   private readonly chutes: THREE.InstancedMesh;
+  private readonly bags: THREE.InstancedMesh;
+  private readonly bagGlows: THREE.InstancedMesh;
   private readonly matrix = new THREE.Matrix4();
   private readonly quaternion = new THREE.Quaternion();
   private readonly position = new THREE.Vector3();
@@ -53,13 +57,20 @@ export class HazardsView {
     const chute = new THREE.SphereGeometry(1.6, 14, 6, 0, Math.PI * 2, 0, Math.PI / 2);
     chute.translate(0, 2.2, 0);
     this.chutes = new THREE.InstancedMesh(chute, new THREE.MeshStandardMaterial({ color: 0xd8d0c0, roughness: 0.9, side: THREE.DoubleSide }), MAX_DROPS);
-    for (const mesh of [this.pools, this.cores, this.lures, this.lights, this.glows, this.crates, this.chutes]) {
+    // Lo que sueltan los zombies: una bolsita con un brillo tenue debajo para que se vea de noche.
+    this.bags = new THREE.InstancedMesh(
+      new THREE.BoxGeometry(0.34, 0.22, 0.26).translate(0, 0.11, 0),
+      new THREE.MeshStandardMaterial({ roughness: 0.7, emissive: 0x332200, emissiveIntensity: 0.6 }),
+      MAX_PICKUPS,
+    );
+    this.bagGlows = new THREE.InstancedMesh(disc, glow(0.3), MAX_PICKUPS);
+    for (const mesh of [this.pools, this.cores, this.lures, this.lights, this.glows, this.crates, this.chutes, this.bags, this.bagGlows]) {
       mesh.count = 0;
       mesh.frustumCulled = false;
       mesh.setColorAt(0, this.color.setHex(0xffffff));
     }
     this.crates.castShadow = true;
-    this.root.add(this.pools, this.cores, this.lures, this.lights, this.glows, this.crates, this.chutes);
+    this.root.add(this.pools, this.cores, this.lures, this.lights, this.glows, this.crates, this.chutes, this.bags, this.bagGlows);
   }
 
   update(state: GameState, time: number, dt: number): void {
@@ -117,6 +128,20 @@ export class HazardsView {
       drops++;
     }
 
+    let bags = 0;
+    for (const b of state.pickups) {
+      if (bags >= MAX_PICKUPS) break;
+      // El botín de jefe es más grande y dorado; late para que se note.
+      const pulse = 0.8 + 0.2 * Math.sin(time * 4 + b.x);
+      this.quaternion.setFromAxisAngle(this.up, b.x * 7 + b.y * 3);
+      this.place(this.bags, bags, b.x, 0, b.y, b.big ? 2 : 1, b.big ? 0xd8a630 : 0x8a7a50, 1);
+      this.quaternion.identity();
+      this.place(this.bagGlows, bags, b.x, 0.03, b.y, (b.big ? 1.4 : 0.55) * pulse, b.big ? 0xffc040 : 0xffe0a0, b.big ? 0.9 : 0.5);
+      bags++;
+    }
+    this.finish(this.bags, bags);
+    this.finish(this.bagGlows, bags);
+
     this.finish(this.pools, pools);
     this.finish(this.cores, pools);
     this.finish(this.lures, lures);
@@ -146,10 +171,11 @@ export class HazardsView {
   }
 
   private readonly axis = new THREE.Vector3(1, 0, 0);
+  private readonly up = new THREE.Vector3(0, 1, 0);
 
   private place(mesh: THREE.InstancedMesh, index: number, x: number, y: number, z: number, s: number, color: number, brightness: number): void {
     this.position.set(x, y, z);
-    this.scale.set(s, mesh === this.lures || mesh === this.crates || mesh === this.chutes ? s : 1, s);
+    this.scale.set(s, mesh === this.lures || mesh === this.crates || mesh === this.chutes || mesh === this.bags ? s : 1, s);
     if (mesh === this.lights) this.scale.set(s, s, s);
     this.matrix.compose(this.position, this.quaternion, this.scale);
     mesh.setMatrixAt(index, this.matrix);
@@ -163,7 +189,7 @@ export class HazardsView {
   }
 
   dispose(): void {
-    for (const mesh of [this.pools, this.cores, this.lures, this.lights, this.glows, this.crates, this.chutes]) {
+    for (const mesh of [this.pools, this.cores, this.lures, this.lights, this.glows, this.crates, this.chutes, this.bags, this.bagGlows]) {
       mesh.geometry.dispose();
       (mesh.material as THREE.Material).dispose();
       mesh.dispose();

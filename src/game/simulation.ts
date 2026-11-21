@@ -10,6 +10,7 @@ import { unstuck } from './collision';
 import { createEscape, radioExitAt, updateEscape } from './escape';
 import { createDirector } from './zombies';
 import { createLoot, updateLoot } from './loot';
+import { updatePickups } from './pickups';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { updateExplosives } from './explosives';
 import { updateHazards } from './hazards';
@@ -91,6 +92,7 @@ export function createGameState(city: City): GameState {
     hazards: [],
     lures: [],
     drops: [],
+    pickups: [],
     alarmsFired: city.props.map(() => false),
     corpses: [],
     hordeTimer: initialHordeTimer(),
@@ -141,6 +143,7 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   // En la zona de una salida, E es la radio (no revisar la caja de al lado).
   const atRadio = radioExitAt(state, rt.city.evac) >= 0;
   updateLoot(state, rt, intent.search && !atRadio, dt);
+  updatePickups(state);
   updateExplosives(state, rt, dt);
 
   rt.field.update(state.player.x, state.player.y);

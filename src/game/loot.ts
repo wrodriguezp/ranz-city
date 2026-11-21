@@ -159,7 +159,7 @@ export function updateLoot(state: GameState, rt: ZombieRuntime, holding: boolean
   if (container.alarm) triggerCarAlarm(state, rt, container.x, container.y);
 }
 
-function give(state: GameState, item: LootItem): string {
+export function give(state: GameState, item: LootItem): string {
   switch (item.type) {
     case 'suppressor':
       if (state.weapon.suppressor) {
