@@ -8,10 +8,15 @@
 // desde el jugador (los edificios tapan). Con la cámara desde arriba veríamos por encima de los
 // techos lo que hay en la calle de al lado; esto lo evita y mantiene el "no sé qué hay a la vuelta".
 // Dentro de lo visible, la iluminación hace el resto: en la oscuridad apenas se distinguen.
+//
+// Los zombies comunes se dibujan en TRES mallas instanciadas que comparten la matriz: cuerpo,
+// brazo izquierdo y brazo derecho. Así un brazo cortado es solo "no dibujar esa instancia" (una
+// matriz de escala cero), sin geometrías distintas por zombie. Sin piernas se dibuja tumbado
+// hacia adelante, arrastrándose. El tanque, que nunca pierde miembros, sigue en una sola malla.
 
 import * as THREE from 'three';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import type { GameState, Zombie } from '../game/state';
+import { LIMB_ARM_L, LIMB_ARM_R, LIMB_LEGS, type GameState, type Zombie } from '../game/state';
 import { lineOfSight } from '../game/visibility';
 import type { TileGrid } from '../world/tileGrid';
 import { BUILDING_STENCIL } from './cityRenderer';
@@ -22,8 +27,12 @@ const SHAPES: Record<Zombie['kind'], [number, number]> = {
   runner: [0.85, 0.95],
   bloater: [1.65, 0.95],
   screamer: [0.9, 1.12],
+  spitter: [0.95, 0.92],
   tank: [1, 1],
 };
+const BURN_COLOR = new THREE.Color(0xff6a1a);
+/** Inclinación del que se arrastra (radianes hacia adelante). */
+const CRAWL_TILT = -1.25;
 
 const MAX_WALKERS = 600;
 const MAX_TANKS = 8;
@@ -33,21 +42,24 @@ const DRAW_DISTANCE = 34;
 /** Hasta dónde se ve la silueta de un zombie tapado por un edificio. */
 const GHOST_DISTANCE = 20;
 
-function zombieGeometry(radius: number, height: number, armLength: number): THREE.BufferGeometry {
+function zombieParts(radius: number, height: number, armLength: number) {
   const body = new THREE.CapsuleGeometry(radius, height - radius * 2, 4, 10);
   body.translate(0, height / 2, 0);
   // Brazos: dos cajas que salen hacia +x (el frente), a la altura de los hombros.
+  // En Three.js el lado izquierdo del zombie (mirando a +x) es -z.
   const armL = new THREE.BoxGeometry(armLength, radius * 0.35, radius * 0.35);
   armL.translate(radius * 0.5 + armLength / 2, height * 0.72, -radius * 0.55);
   const armR = armL.clone();
   armR.translate(0, 0, radius * 1.1);
-  const merged = mergeGeometries([body.toNonIndexed(), armL.toNonIndexed(), armR.toNonIndexed()]);
-  return merged ?? body;
+  const merged = mergeGeometries([body.toNonIndexed(), armL.toNonIndexed(), armR.toNonIndexed()]) ?? body;
+  return { body, armL, armR, merged };
 }
 
 export class ZombieView {
   readonly root = new THREE.Group();
   private readonly walkers: THREE.InstancedMesh;
+  private readonly armsL: THREE.InstancedMesh;
+  private readonly armsR: THREE.InstancedMesh;
   private readonly tanks: THREE.InstancedMesh;
   private readonly corpses: THREE.InstancedMesh;
   /** Copias de los zombies que solo se dibujan donde algo los TAPA (ver constructor). */
@@ -60,15 +72,20 @@ export class ZombieView {
   private readonly up = new THREE.Vector3(0, 1, 0);
   private readonly side = new THREE.Vector3(0, 0, 1);
   private readonly tumble = new THREE.Quaternion();
+  private readonly hidden = new THREE.Matrix4().makeScale(0, 0, 0);
+  private time = 0;
   private readonly color = new THREE.Color();
   /** Versión de los cadáveres ya dibujada (usamos el total de muertes, que solo crece). */
   private corpseVersion = -1;
 
   constructor() {
     const material = new THREE.MeshStandardMaterial({ roughness: 0.9 });
-    this.walkers = new THREE.InstancedMesh(zombieGeometry(0.33, 1.55, 0.55), material, MAX_WALKERS);
-    this.tanks = new THREE.InstancedMesh(zombieGeometry(0.8, 2.6, 0.9), material.clone(), MAX_TANKS);
-    for (const mesh of [this.walkers, this.tanks]) {
+    const walker = zombieParts(0.33, 1.55, 0.55);
+    this.walkers = new THREE.InstancedMesh(walker.body, material, MAX_WALKERS);
+    this.armsL = new THREE.InstancedMesh(walker.armL, material, MAX_WALKERS);
+    this.armsR = new THREE.InstancedMesh(walker.armR, material, MAX_WALKERS);
+    this.tanks = new THREE.InstancedMesh(zombieParts(0.8, 2.6, 0.9).merged, material.clone(), MAX_TANKS);
+    for (const mesh of [this.walkers, this.armsL, this.armsR, this.tanks]) {
       mesh.castShadow = true;
       mesh.count = 0;
       // Las instancias se mueven por todo el mapa: el "bounding sphere" de la malla original no
@@ -98,7 +115,8 @@ export class ZombieView {
       stencilZFail: THREE.KeepStencilOp,
       stencilZPass: THREE.KeepStencilOp,
     });
-    this.walkerGhosts = new THREE.InstancedMesh(this.walkers.geometry, ghostMaterial, MAX_WALKERS);
+    // La silueta usa la malla entera (con brazos): es una mancha roja tenue, el detalle no se nota.
+    this.walkerGhosts = new THREE.InstancedMesh(walker.merged, ghostMaterial, MAX_WALKERS);
     this.tankGhosts = new THREE.InstancedMesh(this.tanks.geometry, ghostMaterial.clone(), MAX_TANKS);
     for (const mesh of [this.walkerGhosts, this.tankGhosts]) {
       mesh.count = 0;
@@ -118,11 +136,12 @@ export class ZombieView {
     this.corpses.receiveShadow = true;
     this.corpses.frustumCulled = false;
 
-    this.root.add(this.walkers, this.tanks, this.corpses, this.walkerGhosts, this.tankGhosts);
+    this.root.add(this.walkers, this.armsL, this.armsR, this.tanks, this.corpses, this.walkerGhosts, this.tankGhosts);
   }
 
   /** alpha: fracción entre el paso anterior y el actual, para interpolar posiciones. */
   update(state: GameState, grid: TileGrid, viewerX: number, viewerY: number, alpha: number): void {
+    this.time = state.time;
     let walkers = 0;
     let tanks = 0;
     for (const z of state.zombies) {
@@ -145,6 +164,8 @@ export class ZombieView {
       }
     }
     this.finish(this.walkers, walkers);
+    this.finish(this.armsL, walkers);
+    this.finish(this.armsR, walkers);
     this.finish(this.tanks, tanks);
     this.finish(this.walkerGhosts, walkers);
     this.finish(this.tankGhosts, tanks);
@@ -158,17 +179,28 @@ export class ZombieView {
       this.tumble.setFromAxisAngle(this.side, z.air * 1.3 + z.id);
       this.quaternion.multiply(this.tumble);
     }
-    this.position.set(x, z.air, y);
+    const crawling = (z.limbs & LIMB_LEGS) !== 0;
+    if (crawling && z.air <= 0) {
+      // Sin piernas: el cuerpo tumbado hacia adelante, apoyado en el suelo.
+      this.tumble.setFromAxisAngle(this.side, CRAWL_TILT);
+      this.quaternion.multiply(this.tumble);
+    }
+    this.position.set(x, z.air + (crawling ? 0.12 : 0), y);
     // Cada tipo con su silueta: el hinchado es ancho y bajo; el corredor, flaco; el gritón, alto.
     const shape = SHAPES[z.kind];
     // El acechador espera agazapado: más bajo y más ancho. Cuando arranca, se para.
     const crouch = z.role === 'ambusher' && z.mode === 'idle' ? 0.62 : 1;
-    this.scale.set(shape[0] * (crouch < 1 ? 1.15 : 1), shape[1] * crouch, shape[0] * (crouch < 1 ? 1.15 : 1));
+    this.scale.set(shape[0] * (crouch < 1 ? 1.15 : 1), shape[1] * crouch * (crawling ? 0.75 : 1), shape[0] * (crouch < 1 ? 1.15 : 1));
     this.matrix.compose(this.position, this.quaternion, this.scale);
     this.scale.set(1, 1, 1);
     mesh.setMatrixAt(index, this.matrix);
-    const ghost = mesh === this.walkers ? this.walkerGhosts : this.tankGhosts;
+    const walker = mesh === this.walkers;
+    const ghost = walker ? this.walkerGhosts : this.tankGhosts;
     ghost.setMatrixAt(index, this.matrix);
+    if (walker) {
+      this.armsL.setMatrixAt(index, z.limbs & LIMB_ARM_L ? this.hidden : this.matrix);
+      this.armsR.setMatrixAt(index, z.limbs & LIMB_ARM_R ? this.hidden : this.matrix);
+    }
 
     if (z.hitFlash > 0) {
       this.color.setHex(0xffffff);
@@ -180,12 +212,24 @@ export class ZombieView {
       this.color.setHex(0x9aa83a);
     } else if (z.kind === 'screamer') {
       this.color.setHex(z.stagger > 0 && z.ability > 0 ? 0xffffff : 0xb9b0c8);
+    } else if (z.kind === 'spitter') {
+      // Verde ácido; se aclara justo después de escupir.
+      this.color.setHex(z.stagger > 0 && z.ability > 3.5 ? 0xc8f060 : 0x5c9a52);
     } else {
       // Cada zombie con un tono propio entre verde grisáceo y marrón, fijo por su id.
       const t = ((z.id * 0.618034) % 1 + 1) % 1;
       this.color.setRGB(0.36 + t * 0.12, 0.42 + t * 0.05, 0.3 - t * 0.06);
     }
+    if (z.burn > 0 && z.hitFlash <= 0.05) {
+      // Ardiendo: el color tiembla hacia el naranja (las llamas están en effectsView).
+      const flicker = 0.55 + 0.35 * Math.sin(this.time * 23 + z.id * 1.7);
+      this.color.lerp(BURN_COLOR, flicker);
+    }
     mesh.setColorAt(index, this.color);
+    if (walker) {
+      this.armsL.setColorAt(index, this.color);
+      this.armsR.setColorAt(index, this.color);
+    }
   }
 
   /** La silueta usa la misma matriz que el zombie (se escribe justo después, ver write). */
@@ -225,10 +269,11 @@ export class ZombieView {
       (mesh.material as THREE.Material).dispose();
       mesh.dispose();
     }
-    for (const mesh of [this.walkers, this.tanks, this.corpses]) {
+    for (const mesh of [this.walkers, this.armsL, this.armsR, this.tanks, this.corpses]) {
       mesh.geometry.dispose();
       (mesh.material as THREE.Material).dispose();
       mesh.dispose();
     }
+    this.walkerGhosts.geometry.dispose();
   }
 }

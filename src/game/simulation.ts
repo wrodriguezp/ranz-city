@@ -11,6 +11,7 @@ import { createEscape, updateEscape } from './escape';
 import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { updateExplosives } from './explosives';
+import { updateHazards } from './hazards';
 import { BLOCK_SIZE, STREET_WIDTH, Tile } from '../world/tileGrid';
 import { isSolid } from './collision';
 import { createFlashlight, updateFlashlight } from './flashlight';
@@ -74,7 +75,8 @@ export function createGameState(city: City): GameState {
     player: createPlayer(city.spawn.x, city.spawn.y),
     flashlight: createFlashlight(),
     weapon: createWeapons(),
-    inventory: { medkits: 1, batteries: 1, grenades: 1 },
+    // Se arranca con un molotov y unos petardos: para probarlos sin tener que buscarlos.
+    inventory: { medkits: 1, batteries: 1, grenades: 1, molotovs: 1, firecrackers: 1, radios: 0, flares: 0, throwable: 'grenade' },
     loot: createLoot(city.props.length),
     escape: createEscape(city.evac),
     zombies: [],
@@ -82,6 +84,10 @@ export function createGameState(city: City): GameState {
     projectiles: [],
     barrelsBlown: city.barrels.map(() => false),
     pendingBlasts: [],
+    hazards: [],
+    lures: [],
+    drops: [],
+    alarmsFired: city.props.map(() => false),
     corpses: [],
     hordeTimer: initialHordeTimer(),
     noiseHeat: 0,
@@ -112,7 +118,9 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   state.time += dt;
   state.tick++;
 
-  const dash = updatePlayer(state.player, intent, rt.city.grid, dt);
+  // La minigun pesa: mientras disparas caminas a un 60 %.
+  const heavy = state.weapon.current === 'minigun' && intent.attackHeld ? 0.6 : 1;
+  const dash = updatePlayer(state.player, { ...intent, moveX: intent.moveX * heavy, moveY: intent.moveY * heavy }, rt.city.grid, dt);
   if (dash) state.events.push({ type: 'sfx', name: dash, x: state.player.x, y: state.player.y });
   footsteps(state);
 
@@ -127,6 +135,8 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   rt.field.update(state.player.x, state.player.y);
   if (state.tick % FLANK_EVERY === 0) updateFlankField(state, rt, dt);
   updateZombies(state, rt, dt);
+  // Fuego, ácido y señuelos: después de los zombies, porque usan la grilla espacial ya armada.
+  updateHazards(state, rt, dt);
   updateHordes(state, rt, dt, dangerAt(rt.city.zones, state.player.x, state.player.y));
 
   updateEscape(state, rt, rt.city.evac, dt);

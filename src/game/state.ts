@@ -10,6 +10,7 @@ import type { EscapeState } from './escape';
 import type { FlashlightState } from './flashlight';
 import type { LootState } from './loot';
 import type { PlayerState } from './player';
+import type { LootItem } from '../world/props';
 
 /**
  * Tipos de infectado:
@@ -18,9 +19,18 @@ import type { PlayerState } from './player';
  *  bloater  hinchado: lento y duro; al morir REVIENTA y daña a todo lo que esté cerca
  *           (zombies incluidos: matarlo en medio de una horda es una buena idea)
  *  screamer gritón: si te ve, grita y llama a una horda; conviene matarlo primero
+ *  spitter  escupidor: se queda a distancia y te escupe ácido que deja un charco
  *  tank     el jefe del paso obligado: embiste y lanza escombros
  */
-export type ZombieKind = 'walker' | 'runner' | 'bloater' | 'screamer' | 'tank';
+export type ZombieKind = 'walker' | 'runner' | 'bloater' | 'screamer' | 'spitter' | 'tank';
+
+/**
+ * Miembros perdidos de un zombie, como máscara de bits (un número: se serializa sin problema).
+ * Sin un brazo pega más débil; sin los dos no puede atacar (solo empuja). Sin piernas se arrastra.
+ */
+export const LIMB_ARM_L = 1;
+export const LIMB_ARM_R = 2;
+export const LIMB_LEGS = 4;
 
 /**
  * Máquina de estados de un zombie:
@@ -91,6 +101,46 @@ export interface Zombie {
   airV: number;
   /** Enfriamiento de la habilidad especial (grito, lanzamiento del tanque). */
   ability: number;
+  /** Miembros perdidos (ver LIMB_*). */
+  limbs: number;
+  /** Segundos que le quedan ardiendo (molotov, lanzallamas). */
+  burn: number;
+}
+
+/**
+ * Peligro en el suelo: fuego (molotov, lanzallamas) o ácido (escupidor). Un círculo que daña a
+ * quien lo pisa mientras dure. El fuego también prende a los zombies.
+ */
+export interface Hazard {
+  kind: 'fire' | 'acid';
+  x: number;
+  y: number;
+  radius: number;
+  timer: number;
+  maxTimer: number;
+}
+
+/**
+ * Señuelo: algo que hace ruido una y otra vez en un lugar (petardos, una radio, la alarma de un
+ * auto, la bengala). Cada "pulso" es un makeNoise: los zombies van ahí y no a ti.
+ */
+export interface Lure {
+  kind: 'firecracker' | 'radio' | 'alarm' | 'flare';
+  x: number;
+  y: number;
+  timer: number;
+  /** Segundos hasta el próximo pulso de ruido. */
+  pulse: number;
+}
+
+/** Suministro aéreo pedido con una bengala: cae en paracaídas y se revisa como una caja. */
+export interface SupplyDrop {
+  x: number;
+  y: number;
+  /** Segundos que faltan para que toque el suelo (mientras, se ve bajando). */
+  fall: number;
+  opened: boolean;
+  loot: LootItem[];
 }
 
 /**
@@ -98,7 +148,7 @@ export interface Zombie {
  * grilla (rebota contra las paredes) y tiene una altura z con gravedad, solo para el arco.
  */
 export interface Projectile {
-  kind: 'grenade' | 'rock';
+  kind: ProjectileKind;
   /** Dónde va a caer (la roca del tanque marca ese punto en el suelo para que la esquives). */
   targetX: number;
   targetY: number;
@@ -113,6 +163,12 @@ export interface Projectile {
   /** ¿Ya tocó el suelo una vez? (el primer rebote hace ruido). */
   landed: boolean;
 }
+
+export type ProjectileKind = 'grenade' | 'rock' | 'molotov' | 'firecracker' | 'radio' | 'flare' | 'acid' | 'rocket';
+export type BlastName = 'grenade' | 'barrel' | 'bloater' | 'rock' | 'rocket';
+/** Lo que se lanza con G (T cambia cuál). */
+export type ThrowableId = 'grenade' | 'molotov' | 'firecracker' | 'radio' | 'flare';
+export const THROWABLES: ThrowableId[] = ['grenade', 'molotov', 'firecracker', 'radio', 'flare'];
 
 export interface Corpse {
   x: number;
@@ -154,9 +210,15 @@ export type GameEvent =
       crit: boolean;
       kind: ZombieKind;
     }
+  /** Un miembro arrancado: el render suelta la pieza volando. side: -1 izquierda, 1 derecha. */
+  | { type: 'limb'; x: number; y: number; dirX: number; dirY: number; part: 'arm' | 'legs' | 'head'; side: number; kind: ZombieKind; facing: number }
+  /** Llamarada del lanzallamas (un chorro por paso mientras se dispara). */
+  | { type: 'flame'; x: number; y: number; toX: number; toY: number }
+  /** Un arma cuerpo a cuerpo se rompió, o se soltó un arma especial vacía. */
+  | { type: 'drop'; what: string }
   | { type: 'hurt'; damage: number }
   | { type: 'alarm'; x: number; y: number }
-  | { type: 'explosion'; x: number; y: number; radius: number; kind: 'grenade' | 'barrel' | 'bloater' | 'rock' }
+  | { type: 'explosion'; x: number; y: number; radius: number; kind: BlastName }
   | { type: 'barrel'; id: number }
   /** Sonidos sueltos: la lógica solo avisa QUÉ sonó y DÓNDE; el audio decide cómo suena. */
   | { type: 'sfx'; name: SfxName; x: number; y: number }
@@ -167,6 +229,12 @@ export interface Inventory {
   /** Baterías de repuesto para la linterna. */
   batteries: number;
   grenades: number;
+  molotovs: number;
+  firecrackers: number;
+  radios: number;
+  flares: number;
+  /** Lo que se lanza con G. */
+  throwable: ThrowableId;
 }
 
 export interface GameStats {
@@ -195,7 +263,12 @@ export interface GameState {
   /** barrels[id] = true si ese barril (city.barrels) ya explotó. */
   barrelsBlown: boolean[];
   /** Explosiones a punto de salir (cadenas de barriles, hinchados): ver explosives.ts. */
-  pendingBlasts: { x: number; y: number; kind: 'grenade' | 'barrel' | 'bloater' | 'rock'; delay: number }[];
+  pendingBlasts: { x: number; y: number; kind: BlastName; delay: number }[];
+  hazards: Hazard[];
+  lures: Lure[];
+  drops: SupplyDrop[];
+  /** alarmsFired[id] = true si la alarma de ese auto (city.props[id]) ya sonó. */
+  alarmsFired: boolean[];
   corpses: Corpse[];
   /** Segundos hasta la próxima horda. */
   hordeTimer: number;
@@ -231,4 +304,16 @@ export type SfxName =
   | 'roar'
   | 'pack'
   | 'dash'
-  | 'tired';
+  | 'tired'
+  | 'break'
+  | 'sever'
+  | 'ignite'
+  | 'glass'
+  | 'firecracker'
+  | 'radio'
+  | 'spit'
+  | 'plane'
+  | 'landing'
+  | 'rocket'
+  | 'flame'
+  | 'minigun';

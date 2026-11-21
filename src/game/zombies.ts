@@ -23,13 +23,13 @@
 import type { City } from '../world/city';
 import { lightAt } from '../world/streetLights';
 import { isSolid, moveCircle } from './collision';
-import { queueBlast, throwRock } from './explosives';
+import { queueBlast, throwAcid, throwRock } from './explosives';
 import { flashlightPower } from './flashlight';
 import type { FlowField } from './flowField';
 import { PLAYER_RADIUS } from './player';
 import { random, randomRange } from './random';
 import type { SpatialHash } from './spatialHash';
-import type { GameState, Zombie, ZombieKind, ZombieRole } from './state';
+import { LIMB_ARM_L, LIMB_ARM_R, LIMB_LEGS, type GameState, type Zombie, type ZombieKind, type ZombieRole } from './state';
 import { angleBetween, lineOfSight } from './visibility';
 
 /** Lo que necesita la IA además del estado: el mundo y estructuras auxiliares que se recalculan. */
@@ -56,6 +56,7 @@ const STATS: Record<
   runner: { hp: 50, radius: 0.32, minSpeed: 5.4, maxSpeed: 6.2, damage: 5, cooldown: 0.75, reach: 0.4 },
   bloater: { hp: 140, radius: 0.55, minSpeed: 1.7, maxSpeed: 2.1, damage: 10, cooldown: 1.4, reach: 0.45 },
   screamer: { hp: 70, radius: 0.33, minSpeed: 2.8, maxSpeed: 3.3, damage: 4, cooldown: 1, reach: 0.4 },
+  spitter: { hp: 80, radius: 0.34, minSpeed: 2.6, maxSpeed: 3.0, damage: 4, cooldown: 1.1, reach: 0.4 },
   tank: { hp: 1100, radius: 0.8, minSpeed: 2.1, maxSpeed: 2.1, damage: 30, cooldown: 1.6, reach: 0.55 },
 };
 
@@ -95,6 +96,18 @@ const ALERT_EVERY = 6;
 const AMBUSH_HEAR = 9;
 const AMBUSH_BURST = 1.6;
 const AMBUSH_SPEED = 1.8;
+/**
+ * El escupidor: se queda a esta distancia de ti (ni muy cerca ni muy lejos) y escupe ácido cada
+ * tanto. La bola tarda en llegar y marca dónde cae: hay que moverse.
+ */
+const SPIT_MIN = 4;
+const SPIT_MAX = 13;
+const SPIT_KEEP_NEAR = 6;
+const SPIT_KEEP_FAR = 9.5;
+const SPIT_COOLDOWN = 4.5;
+/** Sin piernas se arrastra a esta fracción de su velocidad. Sin un brazo pega a esta fracción. */
+const CRAWL_SPEED = 0.35;
+const ONE_ARM_DAMAGE = 0.6;
 /** Segundos sin ver al jugador antes de rendirse y quedar "investigando" su última posición. */
 const LOSE_INTEREST = 6;
 
@@ -143,7 +156,9 @@ export function createZombie(state: GameState, x: number, y: number, kind: Zombi
     homeY: y,
     air: 0,
     airV: 0,
-    ability: kind === 'tank' ? 4 : 0,
+    ability: kind === 'tank' ? 4 : kind === 'spitter' ? 2 : 0,
+    limbs: 0,
+    burn: 0,
   };
 }
 
@@ -212,36 +227,56 @@ export function damageZombie(
   knockX: number,
   knockY: number,
   stagger: number,
-  options: { crit?: boolean; gib?: boolean } = {},
+  options: DamageOptions = {},
 ): boolean {
   if (z.hp <= 0) return false;
   // Un tanque aturdido recibe el doble: es la ventana para pelearlo.
   const amount = z.kind === 'tank' && z.mode === 'stunned' ? damage * 2 : damage;
   z.hp -= amount;
-  z.hitFlash = 0.12;
+  z.hitFlash = options.burn ? Math.max(z.hitFlash, 0.04) : 0.12;
   const heavy = z.kind === 'tank' ? 0.15 : 1;
   z.knockX += knockX * heavy;
   z.knockY += knockY * heavy;
   z.stagger = Math.max(z.stagger, stagger * heavy);
-  state.events.push({ type: 'blood', x: z.x, y: z.y });
   const knock = Math.hypot(knockX, knockY) || 1;
+  const dirX = knockX / knock;
+  const dirY = knockY / knock;
+
+  // Desmembramiento (nunca al tanque): un arma con filo, una escopeta de cerca o una explosión
+  // pueden arrancar un miembro. Decapitar mata; sin brazos no ataca; sin piernas se arrastra.
+  let beheaded = false;
+  if (z.kind !== 'tank') {
+    if (options.behead || (z.hp <= 0 && options.sever && random(state) < options.sever * 0.5)) {
+      beheaded = true;
+      z.hp = Math.min(z.hp, 0);
+      state.events.push({ type: 'limb', x: z.x, y: z.y, dirX, dirY, part: 'head', side: 0, kind: z.kind, facing: z.facing });
+    } else if (z.hp > 0 && options.sever && random(state) < options.sever) {
+      sever(state, z, dirX, dirY);
+    }
+  }
+
   const killed = z.hp <= 0;
-  state.events.push({
-    type: 'hit',
-    x: z.x,
-    y: z.y,
-    dirX: knockX / knock,
-    dirY: knockY / knock,
-    damage: Math.round(amount),
-    killed,
-    // Revienta si lo dice el arma, o si el golpe fue mucho más de lo que le quedaba.
-    gib: killed && (options.gib === true || -z.hp > z.maxHp * 0.6 || z.kind === 'bloater'),
-    crit: options.crit === true,
-    kind: z.kind,
-  });
+  if (!options.quiet || killed) {
+    state.events.push({ type: 'blood', x: z.x, y: z.y });
+    state.events.push({
+      type: 'hit',
+      x: z.x,
+      y: z.y,
+      dirX,
+      dirY,
+      damage: Math.round(amount),
+      killed,
+      // Revienta si lo dice el arma, o si el golpe fue mucho más de lo que le quedaba.
+      // (Decapitado o quemado, no: queda entero en el suelo.)
+      gib: killed && !beheaded && !options.burn && (options.gib === true || -z.hp > z.maxHp * 0.6 || z.kind === 'bloater'),
+      crit: options.crit === true || beheaded,
+      kind: z.kind,
+    });
+  }
   // Golpearlo lo despierta aunque no te haya visto. De cerca sabe de dónde vino; de lejos
   // (una bala desde la oscuridad) solo sabe la dirección aproximada: va a investigar.
-  if (z.mode !== 'charge' && z.mode !== 'stunned' && z.mode !== 'throw') {
+  // El fuego no le dice nada de dónde estás.
+  if (z.mode !== 'charge' && z.mode !== 'stunned' && z.mode !== 'throw' && !options.burn) {
     const d = Math.hypot(state.player.x - z.x, state.player.y - z.y);
     if (d < 12 || z.seesPlayer) {
       z.mode = 'chase';
@@ -263,6 +298,37 @@ export function damageZombie(
     return true;
   }
   return false;
+}
+
+export interface DamageOptions {
+  crit?: boolean;
+  gib?: boolean;
+  /** Probabilidad de arrancar un miembro (y, si lo mata, la cabeza). */
+  sever?: number;
+  /** Lo decapita sí o sí (ejecución con filo, crítico con filo). */
+  behead?: boolean;
+  /** Sin sangre ni número de daño salvo que muera (lanzallamas, fuego): serían cientos por segundo. */
+  quiet?: boolean;
+  /** Daño por quemadura: no lo despierta hacia ti ni lo empuja. */
+  burn?: boolean;
+}
+
+/** Arranca un brazo (o las piernas, si ya no le quedan brazos o tuvo mala suerte). */
+function sever(state: GameState, z: Zombie, dirX: number, dirY: number): void {
+  const armsLeft = [LIMB_ARM_L, LIMB_ARM_R].filter((bit) => (z.limbs & bit) === 0);
+  const legs = (z.limbs & LIMB_LEGS) === 0 && (armsLeft.length === 0 || random(state) < 0.3);
+  if (legs) {
+    z.limbs |= LIMB_LEGS;
+    z.stagger = Math.max(z.stagger, 0.8);
+    state.events.push({ type: 'limb', x: z.x, y: z.y, dirX, dirY, part: 'legs', side: 0, kind: z.kind, facing: z.facing });
+  } else if (armsLeft.length > 0) {
+    const bit = armsLeft[Math.floor(random(state) * armsLeft.length)];
+    z.limbs |= bit;
+    state.events.push({ type: 'limb', x: z.x, y: z.y, dirX, dirY, part: 'arm', side: bit === LIMB_ARM_L ? -1 : 1, kind: z.kind, facing: z.facing });
+  } else {
+    return;
+  }
+  state.events.push({ type: 'sfx', name: 'sever', x: z.x, y: z.y });
 }
 
 export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): void {
@@ -414,9 +480,25 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
       }
     }
 
+    // El escupidor no se te pega: si te ve, mantiene la distancia y se mueve de costado.
+    if (z.kind === 'spitter' && z.mode === 'chase' && z.seesPlayer && z.stagger <= 0 && !flying && dist < SPIT_MAX) {
+      const ux = toX / (dist || 1);
+      const uy = toY / (dist || 1);
+      const side = z.id % 2 === 0 ? 1 : -1;
+      const toward = dist < SPIT_KEEP_NEAR ? -0.9 : dist > SPIT_KEEP_FAR ? 1 : 0;
+      vx = (ux * toward - uy * side * 0.45) * z.speed;
+      vy = (uy * toward + ux * side * 0.45) * z.speed;
+      z.facing = turnToward(z.facing, Math.atan2(toY, toX), 6 * dt);
+    }
+    // Sin piernas se arrastra.
+    if (z.limbs & LIMB_LEGS) {
+      vx *= CRAWL_SPEED;
+      vy *= CRAWL_SPEED;
+    }
+
     z.ability -= dt;
     // Girar el cuerpo hacia donde camina (salvo en la embestida, que va recta).
-    if (z.mode !== 'charge' && vx * vx + vy * vy > 0.04) z.facing = turnToward(z.facing, Math.atan2(vy, vx), 7 * dt);
+    if (z.mode !== 'charge' && !(z.kind === 'spitter' && z.seesPlayer) && vx * vx + vy * vy > 0.04) z.facing = turnToward(z.facing, Math.atan2(vy, vx), 7 * dt);
 
     // --- Separación: los zombies no se atraviesan entre sí ----------------------------------
     let sepX = 0;
@@ -496,9 +578,12 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
       z.mode !== 'stunned' &&
       z.mode !== 'charge' &&
       pd < touch + STATS[z.kind].reach &&
-      z.attackCooldown <= 0
+      z.attackCooldown <= 0 &&
+      // Sin brazos no puede agarrarte: solo empuja.
+      (z.limbs & (LIMB_ARM_L | LIMB_ARM_R)) !== (LIMB_ARM_L | LIMB_ARM_R)
     ) {
-      hurtPlayer(state, STATS[z.kind].damage);
+      const oneArm = (z.limbs & (LIMB_ARM_L | LIMB_ARM_R)) !== 0;
+      hurtPlayer(state, Math.round(STATS[z.kind].damage * (oneArm ? ONE_ARM_DAMAGE : 1)));
       z.attackCooldown = STATS[z.kind].cooldown;
       z.mode = 'chase';
       z.lastSeenAt = state.time;
@@ -562,6 +647,16 @@ function think(
       if (z.role === 'ambusher') z.ability = AMBUSH_BURST;
     }
     if (z.kind === 'screamer' && z.ability <= 0) scream(state, rt, z);
+    if (z.kind === 'spitter' && z.ability <= 0 && dist > SPIT_MIN && dist < SPIT_MAX && z.stagger <= 0) {
+      // Apunta un poco adelante de donde vas, con error: quedarse quieto es lo peor.
+      const p = state.player;
+      const lead = 0.5;
+      const tx = p.x + (p.x - p.prevX) * 60 * lead + randomRange(state, -0.8, 0.8);
+      const ty = p.y + (p.y - p.prevY) * 60 * lead + randomRange(state, -0.8, 0.8);
+      throwAcid(state, z.x, z.y, tx, ty);
+      z.ability = SPIT_COOLDOWN;
+      z.stagger = 0.35;
+    }
   }
 
   switch (z.mode) {
@@ -701,8 +796,15 @@ function fieldFor(rt: ZombieRuntime, state: GameState, x: number, y: number): Fl
 }
 
 /** Caché simple: la línea de visión al objetivo de investigación solo se recalcula al pensar. */
-const losCache = new Map<number, boolean>();
+// Un caché por runtime (no uno global): si no, una partida nueva heredaba los valores de la
+// anterior para los mismos ids y la misma seed no daba siempre la misma partida.
+const losCaches = new WeakMap<ZombieRuntime, Map<number, boolean>>();
 function lineOfSightCached(rt: ZombieRuntime, z: Zombie, x: number, y: number, tick: number): boolean {
+  let losCache = losCaches.get(rt);
+  if (!losCache) {
+    losCache = new Map();
+    losCaches.set(rt, losCache);
+  }
   if ((tick + z.id) % THINK_EVERY === 0 || !losCache.has(z.id)) {
     losCache.set(z.id, lineOfSight(rt.city.grid, z.x, z.y, x, y));
     if (losCache.size > 2000) losCache.clear();

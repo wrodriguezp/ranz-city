@@ -75,11 +75,15 @@ export class Sfx {
           if (!e.first) break;
           if (e.weapon === 'shotgun') this.shotgun(this.place(e.fromX, e.fromY, l, 1.1));
           else if (e.weapon === 'smg') this.smg(this.place(e.fromX, e.fromY, l, 0.75));
+          // La minigun dispara 22 veces por segundo: cada disparo es casi un click grave.
+          else if (e.weapon === 'minigun') {
+            if (this.throttle('minigun', 0.04)) this.minigun(this.place(e.fromX, e.fromY, l, 0.7));
+          }
           else this.shot(this.place(e.fromX, e.fromY, l, 1));
           break;
         case 'explosion':
           if (e.kind === 'bloater') this.splat(this.place(e.x, e.y, l, 1, 50));
-          else this.explosion(this.place(e.x, e.y, l, e.kind === 'rock' ? 0.8 : 1.3, 80), e.kind === 'rock');
+          else this.explosion(this.place(e.x, e.y, l, e.kind === 'rock' ? 0.8 : e.kind === 'rocket' ? 1.5 : 1.3, 80), e.kind === 'rock');
           break;
         case 'swing':
           this.swing(this.place(e.x, e.y, l, 0.7));
@@ -91,7 +95,11 @@ export class Sfx {
           if (this.throttle('hurt', 0.25)) this.hurt(this.place(l.x, l.y, l, 0.9));
           break;
         case 'alarm':
-          this.alarm(this.place(e.x, e.y, l, 0.8, 60));
+          // El señuelo de alarma avisa cada segundo; el sonido dura casi 4: no encimarlos.
+          if (this.throttle(`alarm${Math.round(e.x)},${Math.round(e.y)}`, 3.7)) this.alarm(this.place(e.x, e.y, l, 0.8, 60));
+          break;
+        case 'flame':
+          if (this.throttle('flame', 0.09)) this.flame(this.place(e.x, e.y, l, 0.6));
           break;
         case 'sfx':
           this.named(e.name, e.x, e.y, l);
@@ -219,6 +227,109 @@ export class Sfx {
       case 'tired':
         if (this.throttle('tired', 0.8)) this.breath(this.place(x, y, l, 0.5));
         break;
+      case 'break': {
+        // El arma blanca se parte: un crujido de madera/metal.
+        const out = this.place(x, y, l, 0.9);
+        if (out) {
+          this.burst(out, 0, 0.18, 'bandpass', 1400, 1, 3);
+          this.click(out, 0.02, 700);
+          this.click(out, 0.07, 450);
+        }
+        break;
+      }
+      case 'sever':
+        if (this.throttle('sever', 0.06)) this.crunch(this.place(x, y, l, 1));
+        break;
+      case 'ignite': {
+        if (!this.throttle('ignite', 0.25)) break;
+        const out = this.place(x, y, l, 0.7);
+        if (out) {
+          const f = this.burst(out, 0, 0.6, 'bandpass', 600, 0.9, 0.8);
+          f.frequency.exponentialRampToValueAtTime(2200, this.ctx!.currentTime + 0.5);
+        }
+        break;
+      }
+      case 'glass': {
+        const out = this.place(x, y, l, 1);
+        if (out) {
+          this.burst(out, 0, 0.25, 'highpass', 4500, 0.9);
+          for (let i = 0; i < 4; i++) this.tone(out, i * 0.03, 'triangle', 3000 + i * 700, 2500 + i * 500, 0.12, 0.15);
+        }
+        break;
+      }
+      case 'firecracker': {
+        // Una ristra: estallidos chicos y desparejos, que se oyen desde lejos.
+        const out = this.place(x, y, l, 0.9, 70);
+        if (out) {
+          for (let i = 0; i < 4; i++) {
+            const at = i * 0.07 + Math.random() * 0.05;
+            this.burst(out, at, 0.06, 'highpass', 1500, 0.9);
+            this.tone(out, at, 'sine', 300, 80, 0.05, 0.4);
+          }
+        }
+        break;
+      }
+      case 'radio': {
+        // Música de radio "de lata": unas notas cuadradas detrás de estática.
+        const out = this.place(x, y, l, 0.5, 50);
+        if (out) {
+          this.burst(out, 0, 1.1, 'bandpass', 2500, 0.15, 0.7);
+          const notes = [523, 659, 784, 659];
+          notes.forEach((n, i) => this.tone(out, i * 0.27, 'square', n, n, 0.24, 0.09));
+        }
+        break;
+      }
+      case 'spit': {
+        const out = this.place(x, y, l, 0.8);
+        if (out) {
+          this.burst(out, 0, 0.2, 'bandpass', 900, 1, 2);
+          this.tone(out, 0, 'sawtooth', 220, 90, 0.18, 0.2);
+        }
+        break;
+      }
+      case 'plane': {
+        // Un avión que pasa alto: zumbido grave que sube y baja (efecto Doppler a mano).
+        const out = this.place(l.x, l.y, l, 0.7, 1000);
+        if (out) {
+          const ctx = this.ctx!;
+          const osc = ctx.createOscillator();
+          osc.type = 'sawtooth';
+          const t = ctx.currentTime;
+          osc.frequency.setValueAtTime(70, t);
+          osc.frequency.linearRampToValueAtTime(95, t + 3);
+          osc.frequency.linearRampToValueAtTime(55, t + 7);
+          const lp = ctx.createBiquadFilter();
+          lp.type = 'lowpass';
+          lp.frequency.value = 400;
+          const env = ctx.createGain();
+          env.gain.setValueAtTime(0.0001, t);
+          env.gain.exponentialRampToValueAtTime(0.35, t + 3);
+          env.gain.exponentialRampToValueAtTime(0.0001, t + 7);
+          osc.connect(lp).connect(env).connect(out);
+          osc.start(t);
+          osc.stop(t + 7.1);
+          this.burst(out, 0, 7, 'lowpass', 300, 0.25);
+        }
+        break;
+      }
+      case 'landing': {
+        const out = this.place(x, y, l, 1, 80);
+        if (out) {
+          this.tone(out, 0, 'sine', 80, 35, 0.4, 1);
+          this.burst(out, 0, 0.3, 'lowpass', 1200, 0.8);
+          this.click(out, 0.05, 600);
+        }
+        break;
+      }
+      case 'rocket': {
+        const out = this.place(x, y, l, 1);
+        if (out) {
+          this.tone(out, 0, 'sine', 120, 50, 0.2, 0.9);
+          const f = this.burst(out, 0, 0.9, 'bandpass', 500, 0.9, 0.7);
+          f.frequency.exponentialRampToValueAtTime(3000, this.ctx!.currentTime + 0.8);
+        }
+        break;
+      }
     }
   }
 
@@ -494,6 +605,20 @@ export class Sfx {
   private alarm(out: AudioNode | null): void {
     if (!out) return;
     for (let i = 0; i < 12; i++) this.tone(out, i * 0.32, 'square', i % 2 ? 620 : 820, i % 2 ? 620 : 820, 0.3, 0.25);
+  }
+
+  /** Minigun: un golpe corto y grave; a 22 por segundo suena a motosierra de balas. */
+  private minigun(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0, 0.05, 'lowpass', 2600, 0.7);
+    this.tone(out, 0, 'sine', 140, 60, 0.05, 0.5);
+  }
+
+  /** Lanzallamas: un soplido continuo (se encadenan varios). */
+  private flame(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0, 0.16, 'bandpass', 700, 0.45, 0.6);
+    this.burst(out, 0, 0.12, 'lowpass', 250, 0.4);
   }
 
   private heartbeat(): void {

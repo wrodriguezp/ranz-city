@@ -15,7 +15,25 @@ import { BLOCK_SIZE, blockStart, nodeStart, STREET_WIDTH, Tile, type TileGrid } 
 import { dangerAt, type ZoneMap } from './zones';
 
 /** ammo = balas livianas (pistola y subfusil); shells = cartuchos de escopeta. */
-export type LootType = 'ammo' | 'shells' | 'grenade' | 'medkit' | 'battery' | 'shotgun' | 'smg';
+export type LootType =
+  | 'ammo'
+  | 'shells'
+  | 'grenade'
+  | 'molotov'
+  | 'firecracker'
+  | 'radio'
+  | 'flare'
+  | 'medkit'
+  | 'battery'
+  | 'shotgun'
+  | 'smg'
+  | 'machete'
+  | 'axe'
+  | 'sledge'
+  | 'katana'
+  | 'minigun'
+  | 'flamer'
+  | 'rocket';
 export type ContainerKind = 'car' | 'crate' | 'body';
 
 export interface LootItem {
@@ -129,8 +147,9 @@ export function placeProps(
       // Depósito militar: el subfusil y granadas. Llegar a la plaza tiene premio.
       const guaranteed: LootItem[][] = [
         [{ type: 'smg', amount: 1 }, { type: 'ammo', amount: 40 }],
-        [{ type: 'medkit', amount: 2 }, { type: 'grenade', amount: 2 }],
-        [{ type: 'shells', amount: 8 }, { type: 'battery', amount: 1 }],
+        [{ type: 'medkit', amount: 2 }, { type: 'grenade', amount: 2 }, { type: 'molotov', amount: 1 }],
+        // Y una bengala: desde la plaza se puede pedir un suministro aéreo.
+        [{ type: 'shells', amount: 8 }, { type: 'battery', amount: 1 }, { type: 'flare', amount: 1 }],
       ];
       corners.forEach(([ox, oy], i) => {
         const x = block.x + ox;
@@ -203,15 +222,32 @@ function rollLoot(kind: ContainerKind, danger: number, rng: Rng): LootItem[] {
   for (let i = 0; i < rolls; i++) {
     if (i > 0 && rng.chance(0.45 - 0.2 * danger)) continue; // vacío
     const r = rng.float();
-    if (r < 0.42) items.push({ type: 'ammo', amount: rng.int(6, 12) + Math.round(danger * 10) });
-    else if (r < 0.58) items.push({ type: 'shells', amount: rng.int(3, 6) + Math.round(danger * 4) });
-    else if (r < 0.68) items.push({ type: 'grenade', amount: 1 });
-    else if (r < 0.84) items.push({ type: 'medkit', amount: 1 });
+    if (r < 0.38) items.push({ type: 'ammo', amount: rng.int(6, 12) + Math.round(danger * 10) });
+    else if (r < 0.52) items.push({ type: 'shells', amount: rng.int(3, 6) + Math.round(danger * 4) });
+    else if (r < 0.6) items.push({ type: 'grenade', amount: 1 });
+    else if (r < 0.66) items.push({ type: 'molotov', amount: 1 });
+    else if (r < 0.71) items.push({ type: 'firecracker', amount: 1 });
+    else if (r < 0.86) items.push({ type: 'medkit', amount: 1 });
     else items.push({ type: 'battery', amount: 1 });
   }
-  // Armas: raras, más en autos (la guantera, el maletero) y en zonas peligrosas.
+  // Armas: raras, más en autos (la guantera, el maletero) y en zonas peligrosas. La escopeta y
+  // el subfusil salen igual de seguido.
   const weaponChance = (kind === 'car' ? 0.1 : 0.04) + 0.08 * danger;
-  if (rng.chance(weaponChance)) items.push({ type: rng.chance(0.55) ? 'shotgun' : 'smg', amount: 1 });
+  if (rng.chance(weaponChance)) items.push({ type: rng.chance(0.5) ? 'shotgun' : 'smg', amount: 1 });
+  // Cuerpo a cuerpo: el machete y el hacha son comunes; la katana, rara. Más en cuerpos y cajas.
+  const meleeChance = (kind === 'car' ? 0.05 : 0.1) + 0.05 * danger;
+  if (rng.chance(meleeChance)) {
+    const m = rng.float();
+    items.push({ type: m < 0.35 ? 'machete' : m < 0.65 ? 'axe' : m < 0.87 ? 'sledge' : 'katana', amount: 1 });
+  }
+  // Una radio (en cajas) o una bengala (en zonas peligrosas): herramientas, no armas.
+  if (kind === 'crate' && rng.chance(0.07)) items.push({ type: 'radio', amount: 1 });
+  if (rng.chance(0.02 + 0.05 * danger)) items.push({ type: 'flare', amount: 1 });
+  // Muy de vez en cuando, un arma especial en una caja de una zona peligrosa.
+  if (kind === 'crate' && rng.chance(0.03 * danger)) {
+    const s = rng.float();
+    items.push({ type: s < 0.34 ? 'minigun' : s < 0.67 ? 'flamer' : 'rocket', amount: 1 });
+  }
   return mergeLoot(items);
 }
 

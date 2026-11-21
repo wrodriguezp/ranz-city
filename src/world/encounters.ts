@@ -17,7 +17,7 @@ import { dangerAt, edgeMidpoint, exitNodes, shortestPath, type ZoneMap } from '.
 export interface ZombieSpawn {
   x: number;
   y: number;
-  kind: 'walker' | 'runner' | 'bloater' | 'screamer' | 'tank';
+  kind: 'walker' | 'runner' | 'bloater' | 'screamer' | 'spitter' | 'tank';
 }
 
 /**
@@ -29,6 +29,7 @@ function commonKind(danger: number, rng: Rng): ZombieSpawn['kind'] {
   if (r < 0.08 + 0.1 * danger) return 'runner';
   if (r < 0.12 + 0.15 * danger) return 'bloater';
   if (r < 0.14 + 0.18 * danger) return 'screamer';
+  if (r < 0.16 + 0.22 * danger) return 'spitter';
   return 'walker';
 }
 

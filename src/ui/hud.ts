@@ -4,7 +4,8 @@
 // es caro; comparar strings no).
 
 import { BATTERY_SECONDS, LOW_BATTERY } from '../game/flashlight';
-import { GUNS, isGun, WEAPON_ORDER } from '../game/combat';
+import { GUNS, isGun, isSpecial, MELEES, ownedSpecial, WEAPON_ORDER } from '../game/combat';
+import { THROW_NAMES, throwableCount } from '../game/explosives';
 import { PLAYER_MAX_HP, STAMINA_MAX } from '../game/player';
 import type { GameEvent, GameState } from '../game/state';
 
@@ -123,21 +124,40 @@ export class Hud {
 
     const w = state.weapon;
     const current = w.current;
-    const main = isGun(current)
-      ? `<b>${GUNS[current].name}</b> ${w.reloadTimer > 0 ? '<i>recargando…</i>' : `${w.mags[current]}/${GUNS[current].mag}`} <span class="dim">· reserva ${w.ammo[GUNS[current].ammo]}</span>`
-      : `<b>BATE</b>`;
-    // La fila de armas: las que tienes, con su tecla; la de la mano, resaltada.
-    const slots = WEAPON_ORDER.map((id, i) => {
-      if (!w.owned[id]) return `<span class="slot none">${i + 1}</span>`;
-      const label = id === 'melee' ? 'bate' : GUNS[id].name.toLowerCase();
-      return `<span class="slot${id === current ? ' on' : ''}">${i + 1} ${label}</span>`;
-    }).join('');
+    const melee = MELEES[w.melee];
+    // Durabilidad del arma blanca (el bate no se rompe).
+    const wear = melee.durability > 0 ? ` <span class="dim">· ${Math.ceil((w.durability / melee.durability) * 100)}%</span>` : '';
+    let main: string;
+    if (isGun(current)) {
+      const gun = GUNS[current];
+      const ammoType = gun.ammo;
+      main = ammoType
+        ? `<b>${gun.name}</b> ${w.reloadTimer > 0 ? '<i>recargando…</i>' : `${w.mags[current]}/${gun.mag}`} <span class="dim">· reserva ${w.ammo[ammoType]}</span>`
+        : `<b>${gun.name}</b> ${w.mags[current]}/${gun.mag} <span class="dim">· se tira al vaciarse</span>`;
+    } else {
+      main = `<b>${melee.name}</b>${wear}`;
+    }
+    // La fila de armas: las que tienes, con su tecla; la de la mano, resaltada. Las tres
+    // especiales comparten la tecla 5 (solo se puede tener una).
+    const special = ownedSpecial(w);
+    const slots = WEAPON_ORDER.filter((id) => !isSpecial(id))
+      .map((id, i) => {
+        if (!w.owned[id]) return `<span class="slot none">${i + 1}</span>`;
+        const label = id === 'melee' ? melee.name.toLowerCase() : GUNS[id].name.toLowerCase();
+        return `<span class="slot${id === current ? ' on' : ''}">${i + 1} ${label}</span>`;
+      })
+      .concat(
+        special
+          ? `<span class="slot special${special === current ? ' on' : ''}">5 ${GUNS[special].name.toLowerCase()}</span>`
+          : `<span class="slot none">5</span>`,
+      )
+      .join('');
     this.set(this.weapon, `${main}<div class="slots">${slots}</div>`);
 
     const inv = state.inventory;
     this.set(
       this.items,
-      `granadas <b>${inv.grenades}</b> [G] · botiquines <b>${inv.medkits}</b> [H] · baterías <b>${inv.batteries}</b> [B] · balas <b>${w.ammo.light}</b> · cartuchos <b>${w.ammo.shells}</b> · muertes <b>${state.stats.kills}</b>`,
+      `<b>[G] ${THROW_NAMES[inv.throwable]} ${throwableCount(inv, inv.throwable)}</b> <span class="dim">[T] cambiar · gr ${inv.grenades} · mol ${inv.molotovs} · pet ${inv.firecrackers} · radio ${inv.radios} · beng ${inv.flares}</span><br>botiquines <b>${inv.medkits}</b> [H] · baterías <b>${inv.batteries}</b> [B] · balas <b>${w.ammo.light}</b> · cartuchos <b>${w.ammo.shells}</b> · muertes <b>${state.stats.kills}</b>`,
     );
 
     // Sigilo: ¿cuántos te están persiguiendo? Si ninguno, estás oculto.

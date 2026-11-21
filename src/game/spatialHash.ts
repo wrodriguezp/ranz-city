@@ -22,7 +22,9 @@ export class SpatialHash {
   ) {
     this.cols = Math.ceil(width / cellSize);
     this.rows = Math.ceil(height / cellSize);
-    this.head = new Int32Array(this.cols * this.rows);
+    // Vacía desde el principio (-1 = celda sin nadie): con ceros, una consulta antes del primer
+    // rebuild seguiría next[0] = 0 para siempre (un golpe en el primer cuadro colgaba el juego).
+    this.head = new Int32Array(this.cols * this.rows).fill(-1);
   }
 
   rebuild(items: readonly { x: number; y: number }[]): void {

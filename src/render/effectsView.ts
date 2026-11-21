@@ -44,7 +44,21 @@ interface Particle {
   angle: number;
   /** Los trozos se quedan en el suelo y se achican al final; las chispas se apagan en el aire. */
   sticky: boolean;
+  /** Alargamiento en un eje (brazos y piernas arrancados son cajas largas, no cubos). */
+  stretch?: number;
+  /** Multiplicador de la gravedad (las llamas suben: negativo). */
+  gravity?: number;
 }
+
+/** Color de piel de cada tipo, para que el brazo arrancado sea del mismo zombie. */
+const SKIN: Record<string, number> = {
+  walker: 0x6b7350,
+  runner: 0x7a6a52,
+  bloater: 0x8a9a40,
+  screamer: 0xb9b0c8,
+  spitter: 0x5c9a52,
+  tank: 0x6a5a48,
+};
 
 export class EffectsView {
   readonly root = new THREE.Group();
@@ -140,6 +154,12 @@ export class EffectsView {
         case 'explosion':
           this.explosion(event.x, event.y, event.radius, event.kind);
           break;
+        case 'limb':
+          this.limb(event);
+          break;
+        case 'flame':
+          this.flame(event.x, event.y, event.toX, event.toY);
+          break;
         default:
           break;
       }
@@ -218,6 +238,109 @@ export class EffectsView {
     this.add(mesh, material, FLASH_LIFE, 1);
   }
 
+  /**
+   * Un miembro arrancado: una caja larga del color del zombie que sale volando hacia donde iba
+   * el golpe, girando, y queda en el suelo. La cabeza es un cubo que rueda. Más un chorro de sangre.
+   */
+  private limb(event: Extract<GameEvent, { type: 'limb' }>): void {
+    const head = event.part === 'head';
+    const legs = event.part === 'legs';
+    // Sale del costado correspondiente: el lado izquierdo es perpendicular a la mirada.
+    const sx = -Math.sin(event.facing) * event.side * 0.3;
+    const sy = Math.cos(event.facing) * event.side * 0.3;
+    const count = legs ? 2 : 1;
+    for (let i = 0; i < count; i++) {
+      const angle = Math.atan2(event.dirY, event.dirX) + (Math.random() - 0.5) * 1.2;
+      const speed = 3 + Math.random() * 4;
+      const index = this.chunkNext % MAX_CHUNKS;
+      const p: Particle = {
+        x: event.x + sx,
+        y: event.y + sy,
+        z: head ? 1.5 : legs ? 0.4 : 1.1,
+        vx: Math.cos(angle) * speed,
+        vy: Math.sin(angle) * speed,
+        vz: head ? 7 : 4 + Math.random() * 3,
+        life: 14,
+        maxLife: 14,
+        size: head ? 0.26 : legs ? 0.17 : 0.12,
+        spin: (Math.random() - 0.5) * 16,
+        angle: Math.random() * 6,
+        sticky: true,
+        stretch: head ? 1 : legs ? 4 : 4.5,
+      };
+      this.chunkData[index] = p;
+      this.chunks.setColorAt(index, this.color.setHex(SKIN[event.kind] ?? 0x6b7350));
+      this.chunkNext++;
+    }
+    if (this.chunks.instanceColor) this.chunks.instanceColor.needsUpdate = true;
+    // El chorro: sangre hacia arriba desde el muñón.
+    for (let i = 0; i < 12; i++) {
+      const a = Math.random() * Math.PI * 2;
+      this.spark(event.x + sx, event.y + sy, head ? 1.5 : 1, Math.cos(a) * 2, Math.sin(a) * 2, 4 + Math.random() * 5, 0.5, 0.08, 0x9a1010);
+    }
+    this.decal(event.x + event.dirX * 0.8, event.y + event.dirY * 0.8, Math.random() * 1000, 0.9);
+  }
+
+  /** El chorro del lanzallamas: lenguas de fuego que avanzan y suben. */
+  private flame(x: number, y: number, toX: number, toY: number): void {
+    const dx = toX - x;
+    const dy = toY - y;
+    const len = Math.hypot(dx, dy) || 1;
+    for (let i = 0; i < 5; i++) {
+      const speed = len * (2.4 + Math.random() * 1.6);
+      const spread = (Math.random() - 0.5) * 0.35;
+      const c = Math.cos(spread);
+      const s = Math.sin(spread);
+      const ux = (dx * c - dy * s) / len;
+      const uy = (dx * s + dy * c) / len;
+      const color = Math.random() < 0.3 ? 0xffe080 : Math.random() < 0.6 ? 0xff8a20 : 0xff4a10;
+      const index = this.sparkNext % MAX_SPARKS;
+      this.sparkData[index] = {
+        x: x + ux * 0.5,
+        y: y + uy * 0.5,
+        z: 1.0,
+        vx: ux * speed,
+        vy: uy * speed,
+        vz: Math.random() * 1.5,
+        life: 0.35 + Math.random() * 0.15,
+        maxLife: 0.5,
+        size: 0.2 + Math.random() * 0.25,
+        spin: 0,
+        angle: Math.random() * 6,
+        sticky: false,
+        gravity: -0.15,
+      };
+      this.sparks.setColorAt(index, this.color.setHex(color));
+      this.sparkNext++;
+    }
+    if (this.sparks.instanceColor) this.sparks.instanceColor.needsUpdate = true;
+    this.lighting.flash(x, y);
+  }
+
+  /** Fuego sobre algo que arde (zombies, charcos): lo llama hazardsView cada tanto. */
+  ember(x: number, y: number, z: number): void {
+    const color = Math.random() < 0.5 ? 0xff8a20 : 0xff5010;
+    const index = this.sparkNext % MAX_SPARKS;
+    this.sparkData[index] = {
+      x: x + (Math.random() - 0.5) * 0.4,
+      y: y + (Math.random() - 0.5) * 0.4,
+      z,
+      vx: (Math.random() - 0.5) * 0.6,
+      vy: (Math.random() - 0.5) * 0.6,
+      vz: 1.5 + Math.random() * 1.5,
+      life: 0.4 + Math.random() * 0.3,
+      maxLife: 0.7,
+      size: 0.14 + Math.random() * 0.14,
+      spin: 0,
+      angle: Math.random() * 6,
+      sticky: false,
+      gravity: -0.1,
+    };
+    this.sparks.setColorAt(index, this.color.setHex(color));
+    if (this.sparks.instanceColor) this.sparks.instanceColor.needsUpdate = true;
+    this.sparkNext++;
+  }
+
   private hit(event: Extract<GameEvent, { type: 'hit' }>): void {
     const tank = event.kind === 'tank';
     // Salpicadura: gotas rojas que salen hacia donde va el golpe.
@@ -230,6 +353,14 @@ export class EffectsView {
     const pieces = event.gib ? (tank ? 30 : 18) : tank ? 10 : 5;
     const power = event.gib ? 9 : 5;
     for (let i = 0; i < pieces; i++) this.chunk(event.x, event.y, event.dirX, event.dirY, power, tank);
+    // Si revienta, además salen volando brazos y una pierna enteros.
+    if (event.gib && !tank && event.kind !== 'bloater') {
+      for (const [part, side] of [['arm', -1], ['arm', 1], ['head', 0]] as const) {
+        if (Math.random() < 0.7) {
+          this.limb({ type: 'limb', x: event.x, y: event.y, dirX: event.dirX, dirY: event.dirY, part, side, kind: event.kind, facing: Math.atan2(event.dirY, event.dirX) });
+        }
+      }
+    }
     const decals = event.gib ? 4 : 2;
     for (let i = 0; i < decals; i++) {
       this.decal(
@@ -409,7 +540,7 @@ export class EffectsView {
       }
       alive++;
       p.life -= dt;
-      p.vz -= GRAVITY * dt * (solid ? 1 : 0.6);
+      p.vz -= GRAVITY * dt * (p.gravity ?? (solid ? 1 : 0.6));
       p.x += p.vx * dt;
       p.y += p.vy * dt;
       p.z += p.vz * dt;
@@ -430,9 +561,11 @@ export class EffectsView {
       // Los trozos se achican el último segundo; las chispas, durante toda su vida.
       const fade = p.sticky ? Math.min(1, p.life) : p.life / p.maxLife;
       const s = p.size * fade;
-      this.euler.set(p.angle, p.angle * 0.7, 0);
+      // Un miembro en el suelo queda acostado (gira solo en el eje vertical).
+      const resting = p.stretch !== undefined && p.z <= floor + 0.001 && p.vz === 0;
+      this.euler.set(resting ? 0 : p.angle, p.angle * 0.7, 0);
       this.quaternion.setFromEuler(this.euler);
-      this.matrix.compose(this.position.set(p.x, p.z, p.y), this.quaternion, this.scale.set(s, s, s));
+      this.matrix.compose(this.position.set(p.x, p.z, p.y), this.quaternion, this.scale.set(s * (p.stretch ?? 1), s, s));
       mesh.setMatrixAt(i, this.matrix);
     }
     mesh.count = alive > 0 ? list.length : 0;

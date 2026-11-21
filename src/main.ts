@@ -14,6 +14,7 @@ import { buildCityView, type CityView } from './render/cityRenderer';
 import { EffectsView } from './render/effectsView';
 import { PropsView } from './render/propsView';
 import { ExplosivesView } from './render/explosivesView';
+import { HazardsView } from './render/hazardsView';
 import { searchPrompt } from './game/loot';
 import { exitName } from './game/escape';
 import { EvacView } from './render/evacView';
@@ -88,6 +89,8 @@ const zombieView = new ZombieView();
 scene.add(zombieView.root);
 const effects = new EffectsView(lighting);
 scene.add(effects.root);
+const hazardsView = new HazardsView(effects);
+scene.add(hazardsView.root);
 const gameHud = new Hud();
 const damageText = new DamageText();
 /**
@@ -244,6 +247,7 @@ function readIntent(): Intent {
     attack: input.consume('Mouse0'),
     attackHeld: input.isDown('Mouse0'),
     throwGrenade: input.consume('KeyG'),
+    cycleThrowable: input.consume('KeyT'),
     melee: input.consume('Mouse2'),
     dash: input.consume('Space'),
     reload: input.consume('KeyR'),
@@ -257,7 +261,9 @@ function readIntent(): Intent {
             ? 'shotgun'
             : input.consume('Digit4')
               ? 'smg'
-              : undefined,
+              : input.consume('Digit5')
+                ? 'special'
+                : undefined,
   };
 }
 
@@ -319,8 +325,10 @@ function frame(now: number): void {
     const y = previous.y + (p.y - previous.y) * alpha;
     const facing = lerpAngle(previous.facing, p.facing, alpha);
     playerView.update(x, y, facing, p.air);
+    playerView.setWeapon(state.weapon.current, state.weapon.melee);
     zombieView.update(state, city.grid, x, y, alpha);
     explosivesView?.update(state, now / 1000);
+    hazardsView.update(state, now / 1000, frameDt);
     streetLightView?.update(state.time);
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
