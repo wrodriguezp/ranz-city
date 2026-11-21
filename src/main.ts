@@ -24,6 +24,7 @@ import { WEATHER_EFFECTS } from './world/weather';
 import { WeatherView } from './render/weatherView';
 import { MapView, type ExitMarker } from './ui/mapView';
 import { GameCamera } from './render/gameCamera';
+import { FirstPerson } from './render/firstPerson';
 import { NightLighting } from './render/lighting';
 import { PlayerView } from './render/playerView';
 import { ZombieView } from './render/zombieView';
@@ -50,6 +51,13 @@ scene.background = new THREE.Color(0x05060a);
 const lighting = new NightLighting(scene);
 
 const gameCamera = new GameCamera();
+// Primera persona experimental (tecla P): otra cámara y otra forma de leer el input.
+const firstPerson = new FirstPerson(renderer.domElement);
+const crosshair = document.createElement('div');
+crosshair.style.cssText =
+  'position:fixed;left:50%;top:50%;width:6px;height:6px;margin:-3px 0 0 -3px;border-radius:50%;' +
+  'background:rgba(255,255,255,0.85);box-shadow:0 0 0 2px rgba(0,0,0,0.5);pointer-events:none;display:none;z-index:5';
+document.body.appendChild(crosshair);
 
 // Cámara de revisión (modo V): ortográfica con controles de órbita.
 const REVIEW_VIEW_SIZE = 160;
@@ -64,6 +72,7 @@ reviewControls.enabled = false;
 function resizeCameras(): void {
   const aspect = window.innerWidth / window.innerHeight;
   gameCamera.resize(aspect);
+  firstPerson.resize(aspect);
   reviewCamera.left = (-REVIEW_VIEW_SIZE * aspect) / 2;
   reviewCamera.right = (REVIEW_VIEW_SIZE * aspect) / 2;
   reviewCamera.top = REVIEW_VIEW_SIZE / 2;
@@ -252,6 +261,14 @@ function setMode(next: Mode): void {
 /** Traduce teclado y mouse a una intención en coordenadas del mundo. */
 function readIntent(): Intent {
   const move = input.screenMove();
+  if (firstPerson.active) {
+    // En primera persona WASD va según la mirada y se apunta al centro de la pantalla.
+    const world = firstPerson.move(move);
+    const target = firstPerson.aim(state.player.x, state.player.y);
+    aim.x = target.x;
+    aim.y = target.y;
+    return { ...actions(), moveX: world.x, moveY: world.y, aimX: aim.x, aimY: aim.y };
+  }
   const axes = gameCamera.screenAxesOnGround();
   const mouseOnGround = gameCamera.groundPointUnderMouse(input.mouse.x, input.mouse.y);
   if (mouseOnGround) {
@@ -264,6 +281,13 @@ function readIntent(): Intent {
     moveY: move.x * axes.rightY + move.y * axes.upY,
     aimX: aim.x,
     aimY: aim.y,
+    ...actions(),
+  };
+}
+
+/** Las acciones (teclas y botones), iguales en las dos cámaras. */
+function actions(): Omit<Intent, 'moveX' | 'moveY' | 'aimX' | 'aimY'> {
+  return {
     toggleFlashlight: input.consume('KeyF'),
     changeBattery: input.consume('KeyB'),
     useMedkit: input.consume('KeyH'),
@@ -350,6 +374,11 @@ function frame(now: number): void {
     const y = previous.y + (p.y - previous.y) * alpha;
     const facing = lerpAngle(previous.facing, p.facing, alpha);
     playerView.update(x, y, facing, p.air);
+    // En primera persona no se dibuja el propio cuerpo (la cámara quedaría dentro de la cabeza).
+    playerView.root.visible = !firstPerson.active;
+    crosshair.style.display = firstPerson.active && !screens.current ? 'block' : 'none';
+    if (firstPerson.active) firstPerson.update(x, y, p.air);
+    const view = firstPerson.active ? firstPerson.camera : gameCamera.camera;
     playerView.setWeapon(state.weapon.current, state.weapon.melee);
     zombieView.update(state, city.grid, x, y, alpha);
     explosivesView?.update(state, now / 1000);
@@ -357,11 +386,13 @@ function frame(now: number): void {
     streetLightView?.update(state.time);
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
-    cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
+    // Recortar paredes y techos que tapan al jugador solo tiene sentido con la cámara de arriba.
+    if (firstPerson.active) cityView?.updateOcclusion();
+    else cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
     cityView?.update(now / 1000, x, y);
     weatherView?.update(x, y, now / 1000);
     // Los eventos de los pasos de este cuadro: efectos y mensajes, y después se descartan.
-    const axes = gameCamera.screenAxesOnGround();
+    const axes = firstPerson.active ? { rightX: firstPerson.right().x, rightY: firstPerson.right().y } : gameCamera.screenAxesOnGround();
     const listener = { x, y, rightX: axes.rightX, rightY: axes.rightY };
     sfx.handle(state.events, listener);
     if (!screens.current) sfx.ambient(frameDt, listener, state.zombies, state.player.hp);
@@ -373,8 +404,8 @@ function frame(now: number): void {
     state.events.length = 0;
     effects.update(frameDt);
     gameHud.update(state, now / 1000, lightAt(city.lights, state.player.x, state.player.y, state.time));
-    damageText.update(gameCamera.camera, now / 1000);
-    gauges.update(state, gameCamera.camera, input.mouse, x, y, ui);
+    damageText.update(view, now / 1000);
+    gauges.update(state, view, firstPerson.active ? { x: window.innerWidth / 2, y: window.innerHeight / 2 } : input.mouse, x, y, ui);
     propsView?.update(state, now / 1000);
     const radio = escapePrompt(state, city.evac);
     const prompt = radio.text ? radio : searchPrompt(state, city.props);
@@ -382,7 +413,7 @@ function frame(now: number): void {
     mapView?.update(state, frameDt, exitMarkers());
     evacView?.update(state, frameDt, now / 1000);
     gameHud.setEvac(clockText(state.time), evacLines());
-    renderer.render(scene, gameCamera.camera);
+    renderer.render(scene, view);
   } else {
     playerView.update(state.player.x, state.player.y, state.player.facing);
     zombieView.update(state, city.grid, state.player.x, state.player.y, 1);
@@ -476,6 +507,11 @@ window.addEventListener('keydown', (event) => {
   switch (event.code) {
     case 'KeyV':
       setMode(mode === 'play' ? 'review' : 'play');
+      break;
+    case 'KeyP':
+      if (mode !== 'play' || screens.current) break;
+      firstPerson.toggle(state.player.facing);
+      gameHud.flash(firstPerson.active ? 'Primera persona (experimental) · mouse para mirar · [P] volver' : 'Vista isométrica');
       break;
     case 'KeyN':
       loadCity(randomSeed());
