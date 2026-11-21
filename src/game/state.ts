@@ -107,6 +107,11 @@ export interface Zombie {
    */
   air: number;
   airV: number;
+  /**
+   * Saltando un obstáculo bajo (valla, barricada, auto): va de (fx, fy) a (tx, ty) en dur
+   * segundos, por encima, sin colisión. t = segundos transcurridos.
+   */
+  vault?: { t: number; dur: number; fx: number; fy: number; tx: number; ty: number };
   /** Viene en una oleada de la defensa final (no suelta loot: para eso está la caja de munición). */
   wave?: boolean;
   /** Número de la horda en la que vino (0 = no vino en una horda). */

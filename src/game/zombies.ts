@@ -21,6 +21,7 @@
 // que corresponda a su objetivo; así un ruido lejano (una granada, una alarma) los aleja de ti.
 
 import type { City } from '../world/city';
+import { Tile } from '../world/tileGrid';
 import { lightAt } from '../world/streetLights';
 import { WEATHER_EFFECTS } from '../world/weather';
 import { isSolid, moveCircle } from './collision';
@@ -32,7 +33,7 @@ import { dropFrom } from './pickups';
 import { random, randomRange } from './random';
 import type { SpatialHash } from './spatialHash';
 import { LIMB_ARM_L, LIMB_ARM_R, LIMB_LEGS, type GameState, type Zombie, type ZombieKind, type ZombieRole } from './state';
-import { angleBetween, lineOfSight } from './visibility';
+import { angleBetween, blocksSight, lineOfSight } from './visibility';
 
 /** Lo que necesita la IA además del estado: el mundo y estructuras auxiliares que se recalculan. */
 export interface ZombieRuntime {
@@ -79,6 +80,23 @@ const ROCK_COOLDOWN = 8;
 const CHARGE_LAUNCH_DAMAGE = 45;
 
 const WANDER_SPEED = 0.7;
+/**
+ * Saltar obstáculos bajos. Las vallas, barricadas, sacos, autos y cajas no tapan la vista: antes
+ * el zombie que te veía al otro lado caminaba en línea recta, chocaba y se quedaba mirándote.
+ * Ahora trepa por encima (lento: mientras sube es un blanco fácil) como en L4D.
+ */
+const VAULT_BASE = 0.55;
+const VAULT_PER_TILE = 0.3;
+const VAULT_HEIGHT = 1.1;
+/** Hasta cuántos tiles de obstáculo salta de una vez (una barricada puede ser gruesa). */
+const VAULT_REACH = 4;
+function vaultable(tile: number | undefined): boolean {
+  return tile === Tile.Fence || tile === Tile.Barricade || tile === Tile.Sandbag || tile === Tile.Car || tile === Tile.Crate;
+}
+/** Lo que frena el paso sin tapar la vista y NO se salta (agua, barriles): ahí hay que rodear. */
+function blocksWalkNotSight(tile: number | undefined): boolean {
+  return blocksSight(tile as Tile) || tile === Tile.Water || tile === Tile.Barrel;
+}
 const THINK_EVERY = 10;
 /** Más lejos que esto, los zombies que no persiguen ni se mueven: ahorra CPU y nadie lo nota. */
 const SLEEP_DISTANCE = 48;
@@ -495,6 +513,23 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
     z.hitFlash = Math.max(0, z.hitFlash - dt);
     z.stagger = Math.max(0, z.stagger - dt);
 
+    // --- Saltando un obstáculo: sigue el arco y no hace nada más ---------------------------
+    if (z.vault) {
+      const v = z.vault;
+      v.t += dt;
+      const k = Math.min(1, v.t / v.dur);
+      z.x = v.fx + (v.tx - v.fx) * k;
+      z.y = v.fy + (v.ty - v.fy) * k;
+      z.air = Math.sin(k * Math.PI) * VAULT_HEIGHT;
+      if (k >= 1) {
+        z.vault = undefined;
+        z.air = 0;
+        z.airV = 0;
+        z.stagger = Math.max(z.stagger, 0.15);
+      }
+      continue;
+    }
+
     const toX = player.x - z.x;
     const toY = player.y - z.y;
     const dist = Math.hypot(toX, toY);
@@ -533,8 +568,9 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
           if (dist < 1.6) {
             vx = (toX / (dist || 1)) * speed;
             vy = (toY / (dist || 1)) * speed;
-          } else if (z.seesPlayer) {
-            // Te ve: va en línea recta, pero no todos al mismo punto (ver chaseGoal).
+          } else if (z.seesPlayer && (walkableLineCached(rt, z, player.x, player.y, state.tick) || !rt.field.direction(z.x, z.y, flow))) {
+            // Te ve y hay paso (o algo que puede saltar): va en línea recta, pero no todos al
+            // mismo punto (ver chaseGoal). Si entre medio hay agua o barriles, rodea por el campo.
             const goal = chaseGoal(rt, z, player.x, player.y, dist, playerVX, playerVY);
             const gx = goal.x - z.x;
             const gy = goal.y - z.y;
@@ -685,6 +721,7 @@ export function updateZombies(state: GameState, rt: ZombieRuntime, dt: number): 
     const wanted = Math.hypot(vx, vy) * dt;
     const blocked = wanted > 0.005 && Math.hypot(z.x - before.x, z.y - before.y) < wanted * 0.3;
     if (blocked && z.mode === 'wander') z.facing = random(state) * Math.PI * 2;
+    if (blocked && (z.mode === 'chase' || z.mode === 'investigate') && !flying && z.stagger <= 0) tryVault(grid, z, vx, vy);
     if (blocked && z.mode === 'charge') {
       // El tanque se estrella contra la pared y queda aturdido.
       startStun(z, CHARGE_STUN);
@@ -967,6 +1004,52 @@ function lineOfSightCached(rt: ZombieRuntime, z: Zombie, x: number, y: number, t
     if (losCache.size > 2000) losCache.clear();
   }
   return losCache.get(z.id)!;
+}
+
+/** ¿Se puede ir caminando en línea recta (o saltando obstáculos bajos)? Se recalcula al pensar. */
+const walkCaches = new WeakMap<ZombieRuntime, Map<number, boolean>>();
+function walkableLineCached(rt: ZombieRuntime, z: Zombie, x: number, y: number, tick: number): boolean {
+  let cache = walkCaches.get(rt);
+  if (!cache) {
+    cache = new Map();
+    walkCaches.set(rt, cache);
+  }
+  if ((tick + z.id) % THINK_EVERY === 0 || !cache.has(z.id)) {
+    cache.set(z.id, lineOfSight(rt.city.grid, z.x, z.y, x, y, blocksWalkNotSight));
+    if (cache.size > 2000) cache.clear();
+  }
+  return cache.get(z.id)!;
+}
+
+/**
+ * Chocó contra algo yendo en la dirección (vx, vy): si es un obstáculo bajo y del otro lado hay
+ * piso libre (a VAULT_REACH tiles como mucho), salta por encima.
+ */
+function tryVault(grid: City['grid'], z: Zombie, vx: number, vy: number): void {
+  const speed = Math.hypot(vx, vy);
+  if (speed < 0.01) return;
+  // Se salta en el eje dominante: así cruza la valla derecho y no en diagonal por la esquina.
+  const ax = Math.abs(vx) >= Math.abs(vy) ? Math.sign(vx) : 0;
+  const ay = ax === 0 ? Math.sign(vy) : 0;
+  const tx0 = Math.floor(z.x);
+  const ty0 = Math.floor(z.y);
+  const first = grid.tiles[(ty0 + ay) * grid.width + (tx0 + ax)];
+  if (!vaultable(first)) return;
+  for (let k = 2; k <= VAULT_REACH + 1; k++) {
+    const lx = tx0 + ax * k;
+    const ly = ty0 + ay * k;
+    const tile = grid.tiles[ly * grid.width + lx];
+    if (vaultable(tile)) continue;
+    if (isSolid(grid, lx, ly)) return; // del otro lado hay un edificio o agua: no hay dónde caer
+    // Cae en el centro del tile en el eje del salto, y conserva la posición en el otro eje.
+    const tx = ax !== 0 ? lx + 0.5 : z.x;
+    const ty = ay !== 0 ? ly + 0.5 : z.y;
+    // Que el círculo entero quepa al caer (si no, a medio tile más).
+    if (isSolid(grid, Math.floor(tx + z.radius * ay), Math.floor(ty + z.radius * ax)) || isSolid(grid, Math.floor(tx - z.radius * ay), Math.floor(ty - z.radius * ax))) return;
+    const tiles = k - 1;
+    z.vault = { t: 0, dur: (VAULT_BASE + VAULT_PER_TILE * tiles) * (z.kind === 'runner' ? 0.7 : z.kind === 'tank' ? 0.6 : 1), fx: z.x, fy: z.y, tx, ty };
+    return;
+  }
 }
 
 /**
