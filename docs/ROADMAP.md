@@ -46,7 +46,25 @@ Lo que más le gusta: la variedad de edificios y escenarios.
   faroles que parpadean siguen siendo los del hito 11. La música usa explorar/tensión/horda/escape de
   `src/music`; si falta una pista, ese estado usa la de menos intensidad.
 
+## Hito 14: que las armas sirvan y el escape tenga tensión
+Feedback de Wilbert: escapar se sentía vacío (te quedas parado en el vehículo) y no se podían usar las armas
+porque cada disparo traía a toda la ciudad.
+- **Defensa final** (14b): en la salida hay una radio. Mantener E pide la evacuación, y desde ahí hay que
+  aguantar 2:30 (helicóptero) o 1:30 (camión) mientras llegan oleadas por un solo lado. La plaza tiene una valla
+  con una entrada y el cruce del camión queda como callejón. Hay una caja de munición que se rellena, barriles en
+  el embudo y mejor arsenal en la plaza. Mientras defiendes no hay hordas al azar y los disparos se oyen poco.
+- **Ritmo** (14c): armas más silenciosas, un director con respiros después de cada horda (y uno extra si la
+  despejas), una reserva finita de 220 zombies de horda y un silenciador para la pistola.
+- **Botín de los zombies** (14d): los especiales sueltan loot seguido y el tanque un botín grande. El tanque que te
+  vio te caza durante 35 s, así que ya no se lo pierde de vista doblando una esquina.
+- **La sonámbula** (14e): un especial ciego en la ruta corta. Hay que pasarla agachado y con la linterna apagada.
+  Despierta, grita y te caza durante 30 s.
+- **Descartado para el prototipo**: personajes articulados (más polígonos). Quedan para la versión en Godot.
+- **Pendiente de probar jugando**: el balance de las oleadas. Un bot quieto con escopeta no aguanta el
+  helicóptero; las constantes están juntas al principio de `src/game/escape.ts`.
+
 ## Para más adelante
+- Crescendos: eventos que tú disparas (una alarma, abrir una reja) y que traen una horda a cambio de algo.
 - Bloquear calles empujando objetos (complementa el sigilo; hay que diseñarlo).
 - Perro compañero (duda: ladrar atraería a la horda; quizás gruñe bajito).
 - Progreso entre partidas tipo roguelite (para la versión final).
