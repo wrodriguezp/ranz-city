@@ -11,10 +11,12 @@ import { createEscape, updateEscape } from './escape';
 import { createLoot, updateLoot } from './loot';
 import { createWeapons, updateCombat, type CombatIntent } from './combat';
 import { updateExplosives } from './explosives';
-import { Tile } from '../world/tileGrid';
+import { BLOCK_SIZE, STREET_WIDTH, Tile } from '../world/tileGrid';
+import { isSolid } from './collision';
 import { createFlashlight, updateFlashlight } from './flashlight';
 import { FlowField } from './flowField';
 import { createPlayer, PLAYER_MAX_HP, updatePlayer } from './player';
+import { random } from './random';
 import { SpatialHash } from './spatialHash';
 import type { GameState } from './state';
 import { createZombie, initialHordeTimer, makeNoise, updateHordes, updateZombies, type ZombieRuntime } from './zombies';
@@ -35,6 +37,8 @@ export interface Intent extends CombatIntent {
   search: boolean;
   /** Shift mantenido: agachado. */
   sneak: boolean;
+  /** Espacio: dash. */
+  dash: boolean;
 }
 
 /** Cada cuántos tiles caminados suena una pisada. */
@@ -43,12 +47,19 @@ const STRIDE = 1.6;
 const FOOTSTEP_NOISE = 4.5;
 
 const MEDKIT_HEAL = 60;
+/** Cada cuántos pasos se recalcula el campo de flujo de los flanqueadores (un BFS de la grilla). */
+const FLANK_EVERY = 12;
+/** Cuántos segundos hacia adelante miran los flanqueadores al predecir por dónde vas. */
+const FLANK_LEAD = 2.5;
+/** De los zombies que empiezan parados en un cruce, esta fracción son acechadores. */
+const AMBUSH_CHANCE = 0.45;
 
 export function createRuntime(city: City): Runtime {
   return {
     city,
     field: new FlowField(city.grid),
     noiseField: new FlowField(city.grid),
+    flankField: new FlowField(city.grid),
     hash: new SpatialHash(city.grid.width, city.grid.height, 2),
   };
 }
@@ -74,6 +85,7 @@ export function createGameState(city: City): GameState {
     corpses: [],
     hordeTimer: initialHordeTimer(),
     noiseHeat: 0,
+    alert: { timer: 0, told: -999 },
     lastNoise: { x: city.spawn.x, y: city.spawn.y, time: -999 },
     stats: { kills: 0, shots: 0, hordes: 0 },
     events: [],
@@ -85,6 +97,11 @@ export function createGameState(city: City): GameState {
     const fixed = moveCircle(city.grid, z.x, z.y, z.radius, 0, 0);
     z.x = z.prevX = z.homeX = fixed.x;
     z.y = z.prevY = z.homeY = fixed.y;
+    // Acechadores: algunos comunes que arrancan en un cruce se quedan ahí, agazapados.
+    if ((z.kind === 'walker' || z.kind === 'runner') && atCrossing(z.x, z.y) && random(state) < AMBUSH_CHANCE) {
+      z.role = 'ambusher';
+      z.mode = 'idle';
+    }
     state.zombies.push(z);
   }
   return state;
@@ -95,7 +112,8 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   state.time += dt;
   state.tick++;
 
-  updatePlayer(state.player, intent, rt.city.grid, dt);
+  const dash = updatePlayer(state.player, intent, rt.city.grid, dt);
+  if (dash) state.events.push({ type: 'sfx', name: dash, x: state.player.x, y: state.player.y });
   footsteps(state);
 
   updateItems(state, intent);
@@ -107,6 +125,7 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
   updateExplosives(state, rt, dt);
 
   rt.field.update(state.player.x, state.player.y);
+  if (state.tick % FLANK_EVERY === 0) updateFlankField(state, rt, dt);
   updateZombies(state, rt, dt);
   updateHordes(state, rt, dt, dangerAt(rt.city.zones, state.player.x, state.player.y));
 
@@ -126,6 +145,31 @@ export function stepGame(state: GameState, rt: Runtime, intent: Intent, dt: numb
 export function applyBarrels(city: City, blown: readonly boolean[]): void {
   for (const barrel of city.barrels) {
     city.grid.tiles[barrel.y * city.grid.width + barrel.x] = blown[barrel.id] ? Tile.Sidewalk : Tile.Barrel;
+  }
+}
+
+/** ¿Está el punto dentro de un cruce de calles? (la grilla se repite cada calle + manzana). */
+function atCrossing(x: number, y: number): boolean {
+  const period = STREET_WIDTH + BLOCK_SIZE;
+  return Math.floor(x) % period < STREET_WIDTH && Math.floor(y) % period < STREET_WIDTH;
+}
+
+/**
+ * Los flanqueadores no van a donde estás sino a donde VAS: el origen de su campo de flujo es tu
+ * posición adelantada según tu velocidad. Si el punto adelantado cae en un muro, se retrocede
+ * hacia ti hasta encontrar suelo libre.
+ */
+function updateFlankField(state: GameState, rt: Runtime, dt: number): void {
+  const p = state.player;
+  const vx = (p.x - p.prevX) / dt;
+  const vy = (p.y - p.prevY) / dt;
+  for (let k = 1; k >= 0; k -= 0.25) {
+    const x = p.x + vx * FLANK_LEAD * k;
+    const y = p.y + vy * FLANK_LEAD * k;
+    if (x < 0 || y < 0 || x >= rt.city.grid.width || y >= rt.city.grid.height) continue;
+    if (isSolid(rt.city.grid, Math.floor(x), Math.floor(y))) continue;
+    rt.flankField.update(x, y);
+    return;
   }
 }
 

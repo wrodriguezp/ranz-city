@@ -10,6 +10,7 @@ import { hashString, Rng } from './rng';
 import { buildTileGrid, nodeCenter, type TileGrid } from './tileGrid';
 import { planEvacuation, type EvacPoint } from './evacuation';
 import { placeBarrels, placeProps, type Barrel, type Container } from './props';
+import { placeStreetLights, type LightMap } from './streetLights';
 import { computeZones, type ZoneMap } from './zones';
 
 export interface City {
@@ -27,6 +28,8 @@ export interface City {
   /** Autos, cajas y cuerpos con su loot. */
   props: Container[];
   barrels: Barrel[];
+  /** Faroles y la luz que dan (el sigilo no sirve bajo un farol). */
+  lights: LightMap;
   /** Zonas de evacuación con su hora límite. */
   evac: EvacPoint[];
   /** Huella de la ciudad generada, para comprobar a simple vista que la generación es determinista. */
@@ -59,8 +62,9 @@ export function generateCity(seedText: string): City {
   const encounters = planEncounters(grid, layout, zones, spawn, rng.fork('encounters'));
 
   const evac = planEvacuation(layout);
+  const lights = placeStreetLights(grid, layout, rng.fork('lights'));
 
-  return { seedText, seed, layout, grid, spawn, encounters, zones, props, barrels, evac, fingerprint: fingerprintOf(grid) };
+  return { seedText, seed, layout, grid, spawn, encounters, zones, props, barrels, lights, evac, fingerprint: fingerprintOf(grid) };
 }
 
 /** Hash FNV-1a de los tiles y las alturas de los edificios. */

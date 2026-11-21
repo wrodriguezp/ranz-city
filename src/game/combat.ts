@@ -18,6 +18,7 @@
 
 import { Tile } from '../world/tileGrid';
 import { blowBarrel, throwGrenade } from './explosives';
+import { spendStamina } from './player';
 import { random } from './random';
 import type { GameState } from './state';
 import { blocksBullets, traceRay } from './visibility';
@@ -91,6 +92,10 @@ const MELEE_DAMAGE = 60;
 const MELEE_CRIT_CHANCE = 0.22;
 const MELEE_MAX_TARGETS = 3;
 const MELEE_NOISE = 6;
+/** Cada golpe gasta estamina. Cansado, el bate pega más lento y más débil. */
+const MELEE_STAMINA = 9;
+const TIRED_COOLDOWN = 0.85;
+const TIRED_DAMAGE = 0.6;
 /** Ejecución sigilosa: agachado y por sorpresa, el bate mata de un golpe y casi sin ruido. */
 const TAKEDOWN_NOISE = 2;
 /** La escopeta revienta a los que están a menos de esto. */
@@ -265,8 +270,11 @@ function fireRay(state: GameState, rt: ZombieRuntime, id: GunId, angle: number, 
 
 function swing(state: GameState, rt: ZombieRuntime): void {
   const { player } = state;
-  state.weapon.cooldown = MELEE_COOLDOWN;
+  const rested = spendStamina(player, MELEE_STAMINA);
+  state.weapon.cooldown = rested ? MELEE_COOLDOWN : TIRED_COOLDOWN;
+  const power = rested ? 1 : TIRED_DAMAGE;
   state.events.push({ type: 'swing', x: player.x, y: player.y, facing: player.facing });
+  if (!rested) state.events.push({ type: 'sfx', name: 'tired', x: player.x, y: player.y });
 
   // Los más cercanos primero, hasta 3 por golpe, dentro de un arco frente al jugador.
   const candidates: { index: number; dist: number }[] = [];
@@ -297,7 +305,7 @@ function swing(state: GameState, rt: ZombieRuntime): void {
     } else {
       // Crítico: el golpe puede reventar al zombie (nunca al tanque).
       const crit = z.kind !== 'tank' && random(state) < MELEE_CRIT_CHANCE;
-      damageZombie(state, z, crit ? MELEE_DAMAGE * 3 : MELEE_DAMAGE, nx * 10, ny * 10, 0.6, { crit, gib: crit });
+      damageZombie(state, z, (crit ? MELEE_DAMAGE * 3 : MELEE_DAMAGE) * power, nx * 10 * power, ny * 10 * power, 0.6 * power, { crit, gib: crit });
       loud = true;
     }
   }

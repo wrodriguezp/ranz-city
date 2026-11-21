@@ -5,7 +5,7 @@
 
 import { BATTERY_SECONDS, LOW_BATTERY } from '../game/flashlight';
 import { GUNS, isGun, WEAPON_ORDER } from '../game/combat';
-import { PLAYER_MAX_HP } from '../game/player';
+import { PLAYER_MAX_HP, STAMINA_MAX } from '../game/player';
 import type { GameEvent, GameState } from '../game/state';
 
 const MESSAGE_SECONDS = 3.5;
@@ -16,6 +16,7 @@ export class Hud {
   private readonly healthText: HTMLElement;
   private readonly battery: HTMLElement;
   private readonly batteryText: HTMLElement;
+  private readonly stamina: HTMLElement;
   private readonly weapon: HTMLElement;
   private readonly items: HTMLElement;
   private readonly messages: HTMLElement;
@@ -38,6 +39,7 @@ export class Hud {
       <div class="panel status">
         <div class="row"><span class="label">VIDA</span><div class="bar"><div class="fill health"></div></div><span class="num health-text"></span></div>
         <div class="row"><span class="label">LUZ</span><div class="bar"><div class="fill battery"></div></div><span class="num battery-text"></span></div>
+        <div class="row"><span class="label">AIRE</span><div class="bar"><div class="fill stamina"></div></div><span class="num"></span></div>
         <div class="weapon"></div>
         <div class="items"></div>
       </div>`;
@@ -47,6 +49,7 @@ export class Hud {
     this.healthText = q('.health-text');
     this.battery = q('.battery');
     this.batteryText = q('.battery-text');
+    this.stamina = q('.stamina');
     this.weapon = q('.weapon');
     this.items = q('.items');
     this.messages = q('.messages');
@@ -101,12 +104,16 @@ export class Hud {
     );
   }
 
-  update(state: GameState, now: number): void {
+  /** lampLight: luz de los faroles donde está el jugador (0..1), para avisar que está expuesto. */
+  update(state: GameState, now: number, lampLight = 0): void {
     const p = state.player;
     const hp = Math.max(0, Math.ceil(p.hp));
     this.setStyle(this.health, `${(hp / PLAYER_MAX_HP) * 100}%`);
     this.health.classList.toggle('low', hp <= 30);
     this.set(this.healthText, String(hp));
+
+    this.setStyle(this.stamina, `${(p.stamina / STAMINA_MAX) * 100}%`);
+    this.stamina.classList.toggle('low', p.stamina < 30);
 
     const light = state.flashlight;
     this.setStyle(this.battery, `${light.charge}%`);
@@ -145,9 +152,11 @@ export class Hud {
       ? `<span class="seen">TE VIERON · ${hunting}</span>`
       : searching
         ? `<span class="searching">UNA HORDA TE BUSCA · ${searching}</span>`
-        : p.sneaking
-        ? `<span class="hidden">SIGILO · oculto</span>`
-        : `<span class="dim">oculto</span>`;
+        : lampLight > 0.35
+          ? `<span class="exposed">BAJO UN FAROL · te ven de lejos</span>`
+          : p.sneaking
+            ? `<span class="hidden">SIGILO · oculto</span>`
+            : `<span class="dim">oculto</span>`;
     this.set(this.stealth, stealthHtml);
 
     // Viñeta roja al recibir daño, y permanente (suave) con poca vida.

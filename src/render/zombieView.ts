@@ -161,7 +161,9 @@ export class ZombieView {
     this.position.set(x, z.air, y);
     // Cada tipo con su silueta: el hinchado es ancho y bajo; el corredor, flaco; el gritón, alto.
     const shape = SHAPES[z.kind];
-    this.scale.set(shape[0], shape[1], shape[0]);
+    // El acechador espera agazapado: más bajo y más ancho. Cuando arranca, se para.
+    const crouch = z.role === 'ambusher' && z.mode === 'idle' ? 0.62 : 1;
+    this.scale.set(shape[0] * (crouch < 1 ? 1.15 : 1), shape[1] * crouch, shape[0] * (crouch < 1 ? 1.15 : 1));
     this.matrix.compose(this.position, this.quaternion, this.scale);
     this.scale.set(1, 1, 1);
     mesh.setMatrixAt(index, this.matrix);

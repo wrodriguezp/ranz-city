@@ -2,7 +2,8 @@
 //
 // Tres capas:
 //  1. Luz ambiental casi nula (cielo y luna): alcanza para adivinar la forma de los edificios
-//     y leer el laberinto desde arriba, pero no para ver qué hay en la calle.
+//     y leer el laberinto desde arriba, pero no para ver qué hay en la calle. Lo que se ve sin
+//     linterna son los charcos de los faroles (render/streetLightView.ts).
 //  2. La linterna: un SpotLight (cono de luz) que sale del pecho del jugador hacia el mouse.
 //     Proyecta sombras reales: Three.js dibuja la escena desde la linterna a un "mapa de sombras"
 //     (una textura de profundidades) y, al pintar cada píxel, compara su distancia con ese mapa.
@@ -19,6 +20,9 @@ import * as THREE from 'three';
 
 const FLASHLIGHT_INTENSITY = 160;
 const FLASHLIGHT_RANGE = 30;
+/** Noche cerrada: sin linterna y lejos de un farol casi no se ve nada. */
+const NIGHT_SKY = 0.13;
+const NIGHT_MOON = 0.1;
 /** Altura del pecho, desde donde sale la luz. */
 const FLASHLIGHT_HEIGHT = 1.3;
 
@@ -35,8 +39,8 @@ export class NightLighting {
   private muzzleTimer = 0;
 
   constructor(scene: THREE.Scene) {
-    this.hemisphere = new THREE.HemisphereLight(0x50618a, 0x08080a, 0.35);
-    this.moon = new THREE.DirectionalLight(0x8a9cd0, 0.25);
+    this.hemisphere = new THREE.HemisphereLight(0x50618a, 0x08080a, NIGHT_SKY);
+    this.moon = new THREE.DirectionalLight(0x8a9cd0, NIGHT_MOON);
     this.moon.position.set(-40, 100, -60);
 
     this.flashlight = new THREE.SpotLight(0xfff0d0, FLASHLIGHT_INTENSITY, FLASHLIGHT_RANGE, 0.5, 0.45, 1.0);
@@ -47,7 +51,7 @@ export class NightLighting {
     this.flashlight.shadow.bias = -0.0004;
     this.flashlight.shadow.normalBias = 0.03;
 
-    this.aura = new THREE.PointLight(0xffd9a8, 4, 5.5, 1.4);
+    this.aura = new THREE.PointLight(0xffd9a8, 2.6, 4.5, 1.4);
     this.muzzle = new THREE.PointLight(0xffc060, 0, 14, 1.3);
     this.boom = new THREE.PointLight(0xff8a30, 0, 26, 1.2);
 
@@ -56,9 +60,9 @@ export class NightLighting {
 
   /** En la vista de revisión queremos ver la ciudad completa: luz de día. */
   setDaylight(day: boolean): void {
-    this.hemisphere.intensity = day ? 2.2 : 0.35;
+    this.hemisphere.intensity = day ? 2.2 : NIGHT_SKY;
     this.hemisphere.color.setHex(day ? 0xdfe8ff : 0x50618a);
-    this.moon.intensity = day ? 1.4 : 0.25;
+    this.moon.intensity = day ? 1.4 : NIGHT_MOON;
   }
 
   /** power: 0..1 (sale de flashlightPower, incluye el parpadeo por batería baja). */

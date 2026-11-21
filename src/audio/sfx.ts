@@ -202,6 +202,23 @@ export class Sfx {
       case 'switch':
         this.click(this.place(x, y, l, 0.4), 0, 1700);
         break;
+      case 'roar':
+        // Se oye desde lejos y fuerte: es el aviso de que viene una roca o una embestida.
+        if (this.throttle('roar', 0.6)) this.roar(this.place(x, y, l, 1.3, 90));
+        break;
+      case 'pack':
+        // Varios gruñidos encimados, desfasados: suena a manada, no a un zombie.
+        for (let i = 0; i < 4; i++) {
+          const delay = i * (90 + Math.random() * 120);
+          setTimeout(() => this.groan(this.place(x + (Math.random() - 0.5) * 6, y + (Math.random() - 0.5) * 6, l, 0.8, 40), true), delay);
+        }
+        break;
+      case 'dash':
+        this.whoosh(this.place(x, y, l, 0.7));
+        break;
+      case 'tired':
+        if (this.throttle('tired', 0.8)) this.breath(this.place(x, y, l, 0.5));
+        break;
     }
   }
 
@@ -364,6 +381,53 @@ export class Sfx {
   private blip(out: AudioNode | null, notes: number[]): void {
     if (!out) return;
     notes.forEach((n, i) => this.tone(out, i * 0.07, 'triangle', n, n, 0.12, 0.6));
+  }
+
+  /**
+   * Rugido del tanque: dos dientes de sierra muy graves y desafinados entre sí (eso da el "batido"
+   * áspero), que suben y bajan, más un ruido rasposo encima. Dura más de un segundo.
+   */
+  private roar(out: AudioNode | null): void {
+    if (!out) return;
+    const ctx = this.ctx!;
+    const t = ctx.currentTime;
+    const duration = 1.2;
+    const lp = ctx.createBiquadFilter();
+    lp.type = 'lowpass';
+    lp.frequency.setValueAtTime(300, t);
+    lp.frequency.linearRampToValueAtTime(1100, t + 0.35);
+    lp.frequency.linearRampToValueAtTime(400, t + duration);
+    lp.Q.value = 3;
+    const env = ctx.createGain();
+    env.gain.setValueAtTime(0.0001, t);
+    env.gain.exponentialRampToValueAtTime(0.9, t + 0.15);
+    env.gain.setValueAtTime(0.9, t + 0.7);
+    env.gain.exponentialRampToValueAtTime(0.0001, t + duration);
+    lp.connect(env).connect(out);
+    for (const base of [52, 57]) {
+      const osc = ctx.createOscillator();
+      osc.type = 'sawtooth';
+      osc.frequency.setValueAtTime(base, t);
+      osc.frequency.linearRampToValueAtTime(base * 1.5, t + 0.35);
+      osc.frequency.linearRampToValueAtTime(base * 0.8, t + duration);
+      osc.connect(lp);
+      osc.start(t);
+      osc.stop(t + duration + 0.05);
+    }
+    this.burst(out, 0.05, duration, 'bandpass', 380, 0.35, 2);
+  }
+
+  /** Dash: un soplido corto de ruido agudo que baja. */
+  private whoosh(out: AudioNode | null): void {
+    if (!out) return;
+    const f = this.burst(out, 0, 0.22, 'bandpass', 2400, 0.5, 1.5);
+    f.frequency.exponentialRampToValueAtTime(700, this.ctx!.currentTime + 0.22);
+  }
+
+  /** Sin aire: una exhalación grave y apagada. */
+  private breath(out: AudioNode | null): void {
+    if (!out) return;
+    this.burst(out, 0, 0.45, 'bandpass', 650, 0.35, 0.8);
   }
 
   /** Gruñido: diente de sierra grave con vibrato, filtrado. "angry" = más fuerte y más agudo. */

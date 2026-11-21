@@ -72,14 +72,17 @@ export function throwRock(state: GameState, fromX: number, fromY: number, toX: n
   const dx = toX - fromX;
   const dy = toY - fromY;
   const dist = Math.hypot(dx, dy) || 1;
-  const flight = 0.55 + dist * 0.03;
-  const z0 = 2.4;
-  addProjectile(state, 'rock', fromX + (dx / dist) * 1.1, fromY + (dy / dist) * 1.1, z0, dx / flight, dy / flight, (GRAVITY * flight) / 2 - z0 / flight, 99);
+  // Sale de encima de la cabeza del tanque (la tenía levantada) y cae justo en (toX, toY).
+  const flight = 0.6 + dist * 0.035;
+  const z0 = 3.4;
+  const sx = fromX + (dx / dist) * 0.6;
+  const sy = fromY + (dy / dist) * 0.6;
+  addProjectile(state, 'rock', sx, sy, z0, (toX - sx) / flight, (toY - sy) / flight, (GRAVITY * flight) / 2 - z0 / flight, 99, toX, toY);
   state.events.push({ type: 'sfx', name: 'throw', x: fromX, y: fromY });
 }
 
-function addProjectile(state: GameState, kind: Projectile['kind'], x: number, y: number, z: number, vx: number, vy: number, vz: number, fuse: number): void {
-  state.projectiles.push({ kind, x, y, z, vx, vy, vz, fuse, landed: false });
+function addProjectile(state: GameState, kind: Projectile['kind'], x: number, y: number, z: number, vx: number, vy: number, vz: number, fuse: number, targetX = x, targetY = y): void {
+  state.projectiles.push({ kind, targetX, targetY, x, y, z, vx, vy, vz, fuse, landed: false });
 }
 
 /** Mueve lo que vuela, cuenta las mechas y resuelve las explosiones pendientes. */

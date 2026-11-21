@@ -41,6 +41,8 @@ canvas { cursor: crosshair; }
 #game-hud .fill.health.low { background: #e04545; }
 #game-hud .fill.battery { background: #f2d16b; }
 #game-hud .fill.battery.low { background: #c77d2b; }
+#game-hud .fill.stamina { background: #7fd38b; transition: width 0.1s linear; }
+#game-hud .fill.stamina.low { background: #b8873f; }
 #game-hud .weapon { margin-top: 4px; }
 #game-hud .weapon b, #game-hud .items b { color: #ffb347; }
 #game-hud .items { margin-top: 4px; font-size: 12px; color: #bbb; }
@@ -114,6 +116,7 @@ canvas { cursor: crosshair; }
 #game-hud .prompt .bar { margin-top: 8px; height: 8px; }
 #game-hud .prompt .fill { background: #8fff8f; }
 #game-hud .stealth .searching { color: #ffb347; font-weight: bold; }
+#game-hud .stealth .exposed { color: #ffd98a; }
 
 /* Números de daño */
 #damage-text { position: fixed; inset: 0; pointer-events: none; overflow: hidden; z-index: 4; }

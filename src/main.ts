@@ -28,6 +28,8 @@ import { Hud } from './ui/hud';
 import { DamageText } from './ui/damageText';
 import { Sfx } from './audio/sfx';
 import { generateCity, type City } from './world/city';
+import { lightAt } from './world/streetLights';
+import { addStreetLightTo, setStreetLightIntensity, StreetLightView } from './render/streetLightView';
 
 // --- Render ---------------------------------------------------------------------------------
 
@@ -74,6 +76,7 @@ const hud = document.getElementById('hud')!;
 
 let city: City;
 let cityView: CityView | undefined;
+let streetLightView: StreetLightView | undefined;
 let state: GameState;
 let runtime: Runtime;
 /** Posición y orientación del jugador en el paso anterior, para interpolar al dibujar. */
@@ -141,6 +144,12 @@ function loadCity(seedText: string): void {
   }
   explosivesView = new ExplosivesView(city.barrels);
   scene.add(explosivesView.root);
+  if (streetLightView) {
+    scene.remove(streetLightView.root);
+    streetLightView.dispose();
+  }
+  streetLightView = new StreetLightView(city.lights);
+  scene.add(streetLightView.root);
 
   startGame();
   resetReviewCamera();
@@ -180,6 +189,8 @@ function startGame(): void {
   screens.show(firstGame ? 'intro' : null, firstGame ? summary() : undefined);
   firstGame = false;
   gameCamera.snapTo(state.player.x, state.player.y);
+  // Todo lo que tiene material estándar recibe la luz de los faroles (los parchados se saltan).
+  addStreetLightTo(scene);
 }
 
 function resetReviewCamera(): void {
@@ -205,6 +216,7 @@ function setMode(next: Mode): void {
   mapView?.setVisible(mode === 'play');
   reviewControls.enabled = mode === 'review';
   lighting.setDaylight(mode === 'review');
+  setStreetLightIntensity(mode === 'review' ? 0 : 1.5);
 }
 
 // --- Lógica (paso fijo) ---------------------------------------------------------------------
@@ -232,7 +244,8 @@ function readIntent(): Intent {
     attack: input.consume('Mouse0'),
     attackHeld: input.isDown('Mouse0'),
     throwGrenade: input.consume('KeyG'),
-    melee: input.consume('Mouse2') || input.consume('Space'),
+    melee: input.consume('Mouse2'),
+    dash: input.consume('Space'),
     reload: input.consume('KeyR'),
     select: input.consume('KeyQ')
       ? 'next'
@@ -308,6 +321,7 @@ function frame(now: number): void {
     playerView.update(x, y, facing, p.air);
     zombieView.update(state, city.grid, x, y, alpha);
     explosivesView?.update(state, now / 1000);
+    streetLightView?.update(state.time);
     gameCamera.follow(x, y, aim.x, aim.y, frameDt);
     lighting.update(x, y, facing, flashlightPower(state.flashlight, state.time), frameDt);
     cityView?.updateOcclusion(x, y, gameCamera.toCameraDirection(toCamera));
@@ -322,7 +336,7 @@ function frame(now: number): void {
     gameHud.handle(state.events, now / 1000);
     state.events.length = 0;
     effects.update(frameDt);
-    gameHud.update(state, now / 1000);
+    gameHud.update(state, now / 1000, lightAt(city.lights, state.player.x, state.player.y, state.time));
     damageText.update(gameCamera.camera, now / 1000);
     propsView?.update(state, now / 1000);
     const prompt = searchPrompt(state, city.props);

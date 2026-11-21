@@ -33,11 +33,22 @@ export type ZombieKind = 'walker' | 'runner' | 'bloater' | 'screamer' | 'tank';
  *  stunned     aturdido después de embestir
  *  throw       (tanque) preparando el lanzamiento de un escombro
  */
+/**
+ * Cómo persigue cada zombie (para que una horda no sea una fila india predecible):
+ *  chaser   perseguidor: va directo hacia ti
+ *  surround envolvente: al acercarse se abre hacia un costado; entre varios te rodean
+ *  flanker  flanqueador: va hacia donde VAS a estar (por otra calle si hace falta) y te corta el paso
+ *  ambusher acechador: quieto en un cruce, agazapado; no se mueve por ruidos lejanos y cuando te ve
+ *           de cerca se lanza con un arranque de velocidad
+ */
+export type ZombieRole = 'chaser' | 'surround' | 'flanker' | 'ambusher';
+
 export type ZombieMode = 'idle' | 'wander' | 'investigate' | 'chase' | 'return' | 'charge' | 'stunned' | 'throw';
 
 export interface Zombie {
   id: number;
   kind: ZombieKind;
+  role: ZombieRole;
   x: number;
   y: number;
   /** Posición en el paso anterior, solo para interpolar al dibujar. */
@@ -88,6 +99,9 @@ export interface Zombie {
  */
 export interface Projectile {
   kind: 'grenade' | 'rock';
+  /** Dónde va a caer (la roca del tanque marca ese punto en el suelo para que la esquives). */
+  targetX: number;
+  targetY: number;
   x: number;
   y: number;
   z: number;
@@ -187,6 +201,11 @@ export interface GameState {
   hordeTimer: number;
   /** "Calor" del ruido: cada disparo suma; si se acumula mucho, llega una horda antes. */
   noiseHeat: number;
+  /**
+   * Alerta en cadena: si 3 o más zombies te persiguen, gruñen y ese ruido llama a los de alrededor.
+   * timer: segundos hasta el próximo gruñido; told: cuándo se avisó por última vez en pantalla.
+   */
+  alert: { timer: number; told: number };
   /** El último ruido fuerte (disparo, alarma, explosión): las hordas van ahí, no a ti. */
   lastNoise: { x: number; y: number; time: number };
   stats: GameStats;
@@ -208,4 +227,8 @@ export type SfxName =
   | 'bounce'
   | 'scream'
   | 'weapon'
-  | 'switch';
+  | 'switch'
+  | 'roar'
+  | 'pack'
+  | 'dash'
+  | 'tired';
