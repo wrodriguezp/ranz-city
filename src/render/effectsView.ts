@@ -130,6 +130,9 @@ export class EffectsView {
           }
           if (event.hit === 'wall') this.burst(event.toX, event.toY, 1.0, 8, 0xffc070, 6, false);
           break;
+        case 'sfx':
+          if (event.name === 'scream') this.screamWaves(event.x, event.y);
+          break;
         case 'swing': {
           const material = new THREE.MeshBasicMaterial({
             color: 0xffffff,
@@ -570,6 +573,28 @@ export class EffectsView {
     }
     mesh.count = alive > 0 ? list.length : 0;
     mesh.instanceMatrix.needsUpdate = true;
+  }
+
+  /**
+   * El gritón grita: ondas rojas que salen de su cabeza, para ver QUIÉN fue aunque esté en la
+   * oscuridad. Cuatro anillos a distintas alturas y tamaños se ven como una onda que se expande.
+   */
+  private screamWaves(x: number, y: number): void {
+    for (let i = 0; i < 4; i++) {
+      const material = new THREE.MeshBasicMaterial({
+        color: i % 2 ? 0xff3a6a : 0xff8a40,
+        transparent: true,
+        depthWrite: false,
+        side: THREE.DoubleSide,
+        blending: THREE.AdditiveBlending,
+      });
+      const ring = new THREE.Mesh(this.ringGeometry, material);
+      ring.rotation.x = -Math.PI / 2;
+      ring.position.set(x, 1.3 + i * 0.15, y);
+      ring.scale.setScalar(0.4 + i * 0.9);
+      this.add(ring, material, 0.9 + i * 0.25, 0.9 - i * 0.12, 2.2);
+    }
+    this.burst(x, y, 1.4, 12, 0xff5050, 4, false);
   }
 
   private add(object: THREE.Object3D, material: Fading['material'], life: number, peak: number, grow?: number): void {

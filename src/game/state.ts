@@ -316,7 +316,8 @@ export interface GameState {
    * Alerta en cadena: si 3 o más zombies te persiguen, gruñen y ese ruido llama a los de alrededor.
    * timer: segundos hasta el próximo gruñido; told: cuándo se avisó por última vez en pantalla.
    */
-  alert: { timer: number; told: number };
+  /** told: último aviso de la alerta en cadena; acidTold: último aviso de "estás en el ácido". */
+  alert: { timer: number; told: number; acidTold: number };
   /** El último ruido fuerte (disparo, alarma, explosión): las hordas van ahí, no a ti. */
   lastNoise: { x: number; y: number; time: number };
   stats: GameStats;
@@ -326,6 +327,7 @@ export interface GameState {
 export type SfxName =
   | 'murmur'
   | 'step'
+  | 'sneakstep'
   | 'reload'
   | 'reloaded'
   | 'empty'

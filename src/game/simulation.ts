@@ -98,7 +98,7 @@ export function createGameState(city: City): GameState {
     hordeTimer: initialHordeTimer(),
     noiseHeat: 0,
     director: createDirector(),
-    alert: { timer: 0, told: -999 },
+    alert: { timer: 0, told: -999, acidTold: -999 },
     lastNoise: { x: city.spawn.x, y: city.spawn.y, time: -999 },
     stats: { kills: 0, shots: 0, hordes: 0 },
     events: [],
@@ -207,7 +207,7 @@ function footsteps(state: GameState): void {
   const p = state.player;
   if (p.stride < STRIDE) return;
   p.stride = 0;
-  state.events.push({ type: 'sfx', name: 'step', x: p.x, y: p.y });
+  state.events.push({ type: 'sfx', name: p.sneaking ? 'sneakstep' : 'step', x: p.x, y: p.y });
   if (!p.sneaking) makeNoise(state, p.x, p.y, FOOTSTEP_NOISE);
 }
 

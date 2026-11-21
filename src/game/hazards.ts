@@ -120,6 +120,11 @@ export function updateHazards(state: GameState, rt: ZombieRuntime, dt: number): 
   if (tick && (playerFire || playerAcid)) {
     hurtPlayer(state, playerFire ? FIRE_PLAYER : ACID_PLAYER);
     state.events.push({ type: 'sfx', name: playerFire ? 'ignite' : 'spit', x: player.x, y: player.y });
+    // Que se entienda por qué baja la vida: el charco puede quedar tapado por algo.
+    if (state.time - state.alert.acidTold > 4) {
+      state.alert.acidTold = state.time;
+      state.events.push({ type: 'message', text: playerFire ? '¡Te estás quemando! Sal del fuego' : '¡Estás pisando ácido! Sal del charco', tone: 'danger' });
+    }
   }
 
   // 2. Zombies ardiendo: pierden vida y contagian a los que tienen pegados.

@@ -81,9 +81,11 @@ export class HazardsView {
       const fire = h.kind === 'fire';
       // Al final se apaga: el radio ya lo achica la lógica; acá además baja el brillo.
       const life = Math.min(1, h.timer / 1.5);
-      const flicker = fire ? 0.85 + 0.15 * Math.sin(time * 17 + h.x * 3) : 0.95 + 0.05 * Math.sin(time * 3 + h.y);
-      this.place(this.pools, pools, h.x, 0.03, h.y, h.radius, fire ? 0xff5a10 : 0x6ad020, life);
-      this.place(this.cores, pools, h.x, 0.035, h.y, h.radius * 0.6 * flicker, fire ? 0xffb040 : 0xb0ff50, life);
+      // El ácido burbujea: el centro late rápido y brilla (antes era un verde quieto que se perdía).
+      const flicker = fire ? 0.85 + 0.15 * Math.sin(time * 17 + h.x * 3) : 0.75 + 0.25 * Math.sin(time * 9 + h.y * 2);
+      // Un poco por encima de la vereda y la plaza (0,15): si no, el charco quedaba escondido abajo.
+      this.place(this.pools, pools, h.x, 0.17, h.y, h.radius, fire ? 0xff5a10 : 0x7af020, life);
+      this.place(this.cores, pools, h.x, 0.175, h.y, h.radius * 0.6 * flicker, fire ? 0xffb040 : 0xd8ff70, life);
       pools++;
     }
 

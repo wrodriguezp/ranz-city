@@ -14,6 +14,16 @@
 import type { GameEvent } from '../game/state';
 import type { Weather } from '../world/weather';
 
+/** Lo que el sonido ambiente necesita saber de cada zombie (un Zombie del estado lo cumple). */
+export interface AmbientZombie {
+  x: number;
+  y: number;
+  hp: number;
+  kind: string;
+  mode: string;
+  armored?: boolean;
+}
+
 export interface Listener {
   x: number;
   y: number;
@@ -33,6 +43,9 @@ export class Sfx {
   /** Para no saturar: último momento en que sonó cada tipo de sonido. */
   private readonly last = new Map<string, number>();
   private nextAmbient = 4;
+  /** Pasos de los zombies cercanos y la "firma" de cada especial (ver signatures). */
+  private nextShuffle = 0;
+  private readonly nextSignature = new Map<string, number>();
   private nextHeartbeat = 0;
   /** Bus de la música (pasa por el master: el mute y el compresor también la afectan). */
   private musicBus: GainNode | null = null;
@@ -178,7 +191,7 @@ export class Sfx {
    * Sonidos de ambiente que no salen de la lógica: gruñidos de zombies cercanos cada tanto
    * (para que se sientan aunque no se vean) y el latido con poca vida.
    */
-  ambient(dt: number, l: Listener, zombies: readonly { x: number; y: number; hp: number }[], hp: number): void {
+  ambient(dt: number, l: Listener, zombies: readonly AmbientZombie[], hp: number): void {
     if (!this.ctx || this.ctx.state !== 'running') return;
     this.ensureBed();
     // La ciudad muere a lo lejos: cada tanto, algo suena fuera de la vista.
@@ -198,6 +211,8 @@ export class Sfx {
       // Más zombies cerca = gruñidos más seguidos.
       this.nextAmbient = 1.2 + Math.random() * 3 / Math.max(1, near.length / 4);
     }
+    this.shuffles(dt, l, zombies);
+    this.signatures(dt, l, zombies);
     this.nextHeartbeat -= dt;
     if (hp > 0 && hp <= 30 && this.nextHeartbeat <= 0) {
       this.heartbeat();
@@ -234,7 +249,10 @@ export class Sfx {
   private named(name: string, x: number, y: number, l: Listener): void {
     switch (name) {
       case 'step':
-        this.step(this.place(x, y, l, 0.18));
+        this.step(this.place(x, y, l, 0.42));
+        break;
+      case 'sneakstep':
+        this.step(this.place(x, y, l, 0.12));
         break;
       case 'reload': {
         // Sacar el cargador: un clac metálico y el golpe sordo del cargador vacío.
@@ -569,6 +587,102 @@ export class Sfx {
     lp.connect(out);
     this.tone(lp, 0, 'sawtooth', 190, 110, 0.22, 0.5);
     this.burst(out, 0, 0.08, 'lowpass', 600, 0.6);
+  }
+
+  /**
+   * Pasos arrastrados de los zombies que se mueven cerca: más zombies persiguiéndote = un
+   * murmullo de pasos más denso. Uno al azar por vez (no 300 sonidos a la vez).
+   */
+  private shuffles(dt: number, l: Listener, zombies: readonly AmbientZombie[]): void {
+    this.nextShuffle -= dt;
+    if (this.nextShuffle > 0) return;
+    const moving = zombies.filter(
+      (z) => z.hp > 0 && z.kind !== 'tank' && (z.mode === 'chase' || z.mode === 'investigate') && Math.abs(z.x - l.x) < 14 && Math.abs(z.y - l.y) < 14,
+    );
+    this.nextShuffle = moving.length ? Math.max(0.07, 0.45 / Math.sqrt(moving.length)) : 0.4;
+    if (!moving.length) return;
+    const z = moving[Math.floor(Math.random() * moving.length)];
+    const out = this.place(z.x, z.y, l, z.kind === 'runner' ? 0.4 : 0.3, 16);
+    if (!out) return;
+    // Arrastrar el pie: un roce (ruido) más largo y grave que el paso del jugador.
+    this.burst(out, 0, 0.12, 'lowpass', 300 + Math.random() * 150, 0.7);
+    if (z.armored) this.burst(out, 0.02, 0.05, 'bandpass', 3800, 0.35, 6); // las placas tintinean
+  }
+
+  /**
+   * Cada especial suena distinto, así se lo reconoce antes de verlo (como en L4D):
+   *  - tanque: pisadas que retumban (grave) y un resoplido;
+   *  - gritón: jadeo agudo y entrecortado, como tomando aire para gritar;
+   *  - escupidor: gárgara burbujeante;
+   *  - gordo (bloater): burbujeo húmedo, lento;
+   *  - corredor: respiración rápida y rasposa.
+   * Suena el más cercano de cada tipo, con su propio ritmo.
+   */
+  private signatures(dt: number, l: Listener, zombies: readonly AmbientZombie[]): void {
+    const nearest = new Map<string, AmbientZombie>();
+    const best = new Map<string, number>();
+    for (const z of zombies) {
+      if (z.hp <= 0 || z.kind === 'walker' || z.kind === 'sleeper') continue;
+      const d = Math.abs(z.x - l.x) + Math.abs(z.y - l.y);
+      if (d > 34) continue;
+      if (d < (best.get(z.kind) ?? Infinity)) {
+        best.set(z.kind, d);
+        nearest.set(z.kind, z);
+      }
+    }
+    for (const [kind, z] of nearest) {
+      const left = (this.nextSignature.get(kind) ?? 0) - dt;
+      if (left > 0) {
+        this.nextSignature.set(kind, left);
+        continue;
+      }
+      const active = z.mode === 'chase' || z.mode === 'charge';
+      let next = 1;
+      switch (kind) {
+        case 'tank': {
+          const out = this.place(z.x, z.y, l, 1, 34);
+          if (out) {
+            this.tone(out, 0, 'sine', 70, 38, 0.22, 0.9);
+            this.burst(out, 0, 0.16, 'lowpass', 160, 0.8);
+            if (Math.random() < 0.15) this.tone(out, 0.1, 'sawtooth', 90, 60, 0.5, 0.25);
+          }
+          next = active ? 0.36 : 0.75;
+          break;
+        }
+        case 'screamer': {
+          const out = this.place(z.x, z.y, l, 0.55, 24);
+          if (out) {
+            const f = this.burst(out, 0, 0.35, 'bandpass', 2600, 0.5, 6);
+            f.frequency.linearRampToValueAtTime(1800, this.ctx!.currentTime + 0.35);
+            this.tone(out, 0.05, 'triangle', 900, 1300, 0.28, 0.12);
+          }
+          next = 1.6 + Math.random() * 1.2;
+          break;
+        }
+        case 'spitter': {
+          const out = this.place(z.x, z.y, l, 0.6, 22);
+          if (out) for (let i = 0; i < 4; i++) this.burst(out, i * 0.07, 0.05, 'bandpass', 500 + Math.random() * 500, 0.6, 5);
+          next = 1.8 + Math.random() * 1.4;
+          break;
+        }
+        case 'bloater': {
+          const out = this.place(z.x, z.y, l, 0.6, 20);
+          if (out) for (let i = 0; i < 3; i++) this.tone(out, i * 0.16, 'sine', 140 + Math.random() * 60, 70, 0.14, 0.35);
+          next = 2.2 + Math.random() * 1.5;
+          break;
+        }
+        case 'runner': {
+          const out = this.place(z.x, z.y, l, 0.45, 20);
+          if (out) {
+            this.burst(out, 0, 0.12, 'bandpass', 1500, 0.6, 2);
+            this.burst(out, 0.2, 0.12, 'bandpass', 1300, 0.5, 2);
+          }
+          next = active ? 0.45 : 1.6 + Math.random();
+          break;
+        }
+      }
+      this.nextSignature.set(kind, next);
+    }
   }
 
   private step(out: AudioNode | null): void {
